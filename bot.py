@@ -6,6 +6,7 @@ from threading import Thread
 from flask import Flask
 import telebot
 import yt_dlp
+import instaloader
 
 # --- 1. سيرفر Flask المدمج لإبقاء البوت شغالاً 24/7 ---
 app = Flask('')
@@ -27,27 +28,37 @@ keep_alive()
 # --- 2. توكين البوت الخاص بك ---
 TOKEN = '8960864210:AAGg1wQKE5_kwh05FTXPvA30xhc-IrnJrdk'
 bot = telebot.TeleBot(TOKEN)
+L = instaloader.Instaloader(download_videos=True, download_video_thumbnails=False, save_metadata=False, post_metadata_txt_pattern="")
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
 }
 
 def extract_clean_url(text):
-    """استخراج الرابط الصافي وحذف أي رموز مرافقة"""
     match = re.search(r'https?://[^\s]+', text)
     return match.group(0) if match else None
 
-def download_image_via_url(img_url, filename="downloads/photo.jpg"):
-    """تنزيل الصورة عبر requests وتخزينها"""
+def download_instagram_fallback(url):
+    """تنزيل الصور والفيديوهات من إنستغرام عبر Instaloader"""
     try:
-        res = requests.get(img_url, headers=HEADERS, timeout=15)
-        if res.status_code == 200:
-            with open(filename, 'wb') as f:
-                f.write(res.content)
+        shortcode_match = re.search(r'/(?:p|reel|tv)/([^/?#&]+)', url)
+        if shortcode_match:
+            shortcode = shortcode_match.group(1)
+            post = instaloader.Post.from_shortcode(L.context, shortcode)
+            
+            # إن كان المنشور ألبوماً أو صورة مفردة
+            if post.typename == 'GraphSidecar':
+                for i, node in enumerate(post.get_sidecar_nodes()):
+                    img_data = requests.get(node.display_url, headers=HEADERS).content
+                    with open(f"downloads/insta_{i}.jpg", "wb") as f:
+                        f.write(img_data)
+            else:
+                img_data = requests.get(post.url, headers=HEADERS).content
+                with open("downloads/insta_single.jpg", "wb") as f:
+                    f.write(img_data)
             return True
     except Exception as e:
-        print(f"Error downloading image: {e}")
+        print(f"Instaloader Error: {e}")
     return False
 
 @bot.message_handler(func=lambda message: True)
@@ -62,46 +73,24 @@ def handle_download(message):
     msg = bot.reply_to(message, "جاري معالجة الرابط وجلب المحتوى... ⏳")
     os.makedirs('downloads', exist_ok=True)
 
-    ydl_opts = {
-        'outtmpl': 'downloads/%(id)s.%(ext)s',
-        'quiet': True,
-        'no_warnings': True,
-        'user_agent': HEADERS['User-Agent'],
-    }
-
-    # 1. المحاولة الأولى: yt-dlp للتنزيل المباشر (فيديو/صور)
+    # 1. المحاولة الأولى: yt-dlp (ممتاز للفيديوهات واليوتيوب وباقي المواقع)
     try:
+        ydl_opts = {
+            'outtmpl': 'downloads/%(id)s.%(ext)s',
+            'quiet': True,
+            'no_warnings': True,
+            'user_agent': HEADERS['User-Agent'],
+        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
     except Exception:
         pass
 
-    # 2. المحاولة الثانية: استخراج رابط الصور المخفية في بيانات المنشور (Instagram/Pinterest)
-    if not glob.glob('downloads/*'):
-        try:
-            ydl_opts_info = {'quiet': True, 'no_warnings': True, 'skip_download': True}
-            with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
-                info = ydl.extract_info(url, download=False)
-                
-                # جلب الصور سواء كانت صورة مفردة أو ألبوم (thumbnails)
-                images = []
-                if 'entries' in info:
-                    for entry in info['entries']:
-                        if entry.get('url'): images.append(entry['url'])
-                        elif entry.get('thumbnails'): images.append(entry['thumbnails'][-1]['url'])
-                else:
-                    if info.get('url') and ('jpg' in info['url'] or 'png' in info['url'] or 'webp' in info['url']):
-                        images.append(info['url'])
-                    elif info.get('thumbnails'):
-                        images.append(info['thumbnails'][-1]['url'])
+    # 2. المحاولة الثانية: مخصصة لصور وفيديوهات إنستغرام عبر Instaloader
+    if not glob.glob('downloads/*') and 'instagram.com' in url:
+        download_instagram_fallback(url)
 
-                # تنزيل الصور التي تم العثور عليها
-                for i, img_link in enumerate(images):
-                    download_image_via_url(img_link, f"downloads/image_{i}.jpg")
-        except Exception:
-            pass
-
-    # 3. المحاولة الثالثة: قراءة HTML مباشرة لاستخراج og:image (للصور الثابتة)
+    # 3. المحاولة الثالثة: قراءة الصورة المباشرة لـ Pinterest وباقي المواقع
     if not glob.glob('downloads/*'):
         try:
             resp = requests.get(url, headers=HEADERS, timeout=10)
@@ -109,12 +98,15 @@ def handle_download(message):
                         re.search(r'content="([^"]+)"\s+property="og:image"', resp.text)
             if img_match:
                 img_url = img_match.group(1).replace("&amp;", "&")
-                download_image_via_url(img_url, "downloads/og_image.jpg")
+                img_bytes = requests.get(img_url, headers=HEADERS, timeout=10).content
+                with open("downloads/pinterest_img.jpg", "wb") as f:
+                    f.write(img_bytes)
         except Exception:
             pass
 
-    # إرسال الملفات التي تم تنزيلها
+    # إرسال المحتوى المُنزّل
     downloaded_files = glob.glob('downloads/*')
+
     if downloaded_files:
         try:
             for file_path in downloaded_files:
@@ -131,6 +123,6 @@ def handle_download(message):
         except Exception as e:
             bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: ❌\n{str(e)}", message.chat.id, msg.message_id, parse_mode='Markdown')
     else:
-        bot.edit_message_text("عذراً، لم أتمكن من استخراج الصورة أو الفيديو من هذا الرابط. قد يكون المنشور خاصاً. ❌", message.chat.id, msg.message_id)
+        bot.edit_message_text("عذراً، تعذر استخراج الصورة أو الفيديو من هذا الرابط. قد يكون الحساب خاصاً. ❌", message.chat.id, msg.message_id)
 
 bot.polling(non_stop=True)
