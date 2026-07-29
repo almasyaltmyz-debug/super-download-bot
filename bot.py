@@ -38,15 +38,43 @@ def extract_clean_url(text):
     match = re.search(r'https?://[^\s]+', text)
     return match.group(0) if match else None
 
+def download_tiktok_media(url):
+    """تنزيل صور وفيديوهات تيك توك عبر TikWM API"""
+    try:
+        api_url = f"https://www.tikwm.com/api/?url={url}"
+        response = requests.get(api_url, headers=HEADERS, timeout=15).json()
+        
+        if response.get('code') == 0:
+            data = response.get('data', {})
+            
+            # إذا كان المنشور عبارة عن صور متعدّدة (Photo Slide)
+            images = data.get('images')
+            if images:
+                for i, img_url in enumerate(images):
+                    img_data = requests.get(img_url, headers=HEADERS).content
+                    with open(f"downloads/tiktok_img_{i}.jpg", "wb") as f:
+                        f.write(img_data)
+                return True
+
+            # إذا كان فيديو عادي
+            video_url = data.get('play') or data.get('wmplay')
+            if video_url:
+                vid_data = requests.get(video_url, headers=HEADERS).content
+                with open("downloads/tiktok_video.mp4", "wb") as f:
+                    f.write(vid_data)
+                return True
+    except Exception as e:
+        print(f"TikTok API Error: {e}")
+    return False
+
 def download_instagram_fallback(url):
-    """تنزيل الصور والفيديوهات من إنستغرام عبر Instaloader"""
+    """تنزيل الصور والفيديوهات من إنستغرام"""
     try:
         shortcode_match = re.search(r'/(?:p|reel|tv)/([^/?#&]+)', url)
         if shortcode_match:
             shortcode = shortcode_match.group(1)
             post = instaloader.Post.from_shortcode(L.context, shortcode)
             
-            # إن كان المنشور ألبوماً أو صورة مفردة
             if post.typename == 'GraphSidecar':
                 for i, node in enumerate(post.get_sidecar_nodes()):
                     img_data = requests.get(node.display_url, headers=HEADERS).content
@@ -61,6 +89,29 @@ def download_instagram_fallback(url):
         print(f"Instaloader Error: {e}")
     return False
 
+def download_pinterest_fallback(url):
+    """فك روابط بنترست المختصرة وجلب الصورة بجودتها الأصلية"""
+    try:
+        session = requests.Session()
+        response = session.get(url, headers=HEADERS, allow_redirects=True, timeout=15)
+        html = response.text
+        
+        img_match = re.search(r'property="og:image"\s+content="([^"]+)"', html) or \
+                    re.search(r'name="twitter:image"\s+content="([^"]+)"', html) or \
+                    re.search(r'https://i\.pinimg\.com/originals/[^\s"<>]+', html)
+
+        if img_match:
+            img_url = img_match.group(1) if 'content=' in img_match.group(0) or img_match.lastindex else img_match.group(0)
+            img_url = img_url.replace("&amp;", "&")
+            img_url = re.sub(r'/\d+x/', '/originals/', img_url)
+            img_data = requests.get(img_url, headers=HEADERS, timeout=15).content
+            with open("downloads/pinterest_image.jpg", "wb") as f:
+                f.write(img_data)
+            return True
+    except Exception as e:
+        print(f"Pinterest Error: {e}")
+    return False
+
 @bot.message_handler(func=lambda message: True)
 def handle_download(message):
     raw_text = message.text.strip()
@@ -73,38 +124,33 @@ def handle_download(message):
     msg = bot.reply_to(message, "جاري معالجة الرابط وجلب المحتوى... ⏳")
     os.makedirs('downloads', exist_ok=True)
 
-    # 1. المحاولة الأولى: yt-dlp (ممتاز للفيديوهات واليوتيوب وباقي المواقع)
-    try:
-        ydl_opts = {
-            'outtmpl': 'downloads/%(id)s.%(ext)s',
-            'quiet': True,
-            'no_warnings': True,
-            'user_agent': HEADERS['User-Agent'],
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except Exception:
-        pass
+    # 1. تيك توك (TikTok): صور أو فيديوهات
+    if 'tiktok.com' in url:
+        download_tiktok_media(url)
 
-    # 2. المحاولة الثانية: مخصصة لصور وفيديوهات إنستغرام عبر Instaloader
-    if not glob.glob('downloads/*') and 'instagram.com' in url:
+    # 2. إنستغرام (Instagram)
+    elif 'instagram.com' in url:
         download_instagram_fallback(url)
 
-    # 3. المحاولة الثالثة: قراءة الصورة المباشرة لـ Pinterest وباقي المواقع
-    if not glob.glob('downloads/*'):
+    # 3. بنترست (Pinterest)
+    elif 'pinterest.' in url or 'pin.it' in url:
+        download_pinterest_fallback(url)
+
+    # 4. باقي المنصات (YouTube / Twitter / الخ): استخدام yt-dlp
+    else:
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=10)
-            img_match = re.search(r'property="og:image"\s+content="([^"]+)"', resp.text) or \
-                        re.search(r'content="([^"]+)"\s+property="og:image"', resp.text)
-            if img_match:
-                img_url = img_match.group(1).replace("&amp;", "&")
-                img_bytes = requests.get(img_url, headers=HEADERS, timeout=10).content
-                with open("downloads/pinterest_img.jpg", "wb") as f:
-                    f.write(img_bytes)
+            ydl_opts = {
+                'outtmpl': 'downloads/%(id)s.%(ext)s',
+                'quiet': True,
+                'no_warnings': True,
+                'user_agent': HEADERS['User-Agent'],
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
         except Exception:
             pass
 
-    # إرسال المحتوى المُنزّل
+    # إرسال الملفات المُنَزَّلة
     downloaded_files = glob.glob('downloads/*')
 
     if downloaded_files:
@@ -123,6 +169,6 @@ def handle_download(message):
         except Exception as e:
             bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: ❌\n{str(e)}", message.chat.id, msg.message_id, parse_mode='Markdown')
     else:
-        bot.edit_message_text("عذراً، تعذر استخراج الصورة أو الفيديو من هذا الرابط. قد يكون الحساب خاصاً. ❌", message.chat.id, msg.message_id)
+        bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. قد يكون خاصاً أو غير مدعوم. ❌", message.chat.id, msg.message_id)
 
 bot.polling(non_stop=True)
