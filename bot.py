@@ -30,19 +30,20 @@ bot = telebot.TeleBot(TOKEN)
 def handle_download(message):
     url = message.text.strip()
 
-    # التأكد من صحة الرابط
     if not (url.startswith("http://") or url.startswith("https://")):
         bot.reply_to(message, "من فضلك أرسل رابطاً صحيحاً للتحميل 🔗")
         return
 
     msg = bot.reply_to(message, "جاري معالجة الرابط وجلب المحتوى... ⏳")
 
-    # إعدادات التنزيل لكل أنواع الميديا (صور وفيديو)
+    # إعدادات شاملة لتنزيل الصور والفيديوهات والألبومات معاً
     ydl_opts = {
         'outtmpl': 'downloads/%(id)s_%(autonumber)s.%(ext)s',
         'quiet': True,
         'no_warnings': True,
-        'writethumbnails': False,
+        'format': 'bestvideo+bestaudio/best',
+        'writethumbnails': True,  # لاستخراج الصور والبوستات
+        'allow_playlist_files': True,
     }
 
     os.makedirs('downloads', exist_ok=True)
@@ -51,14 +52,13 @@ def handle_download(message):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.extract_info(url, download=True)
             
-        # جلب كل الملفات التي تم تنزيلها
         downloaded_files = glob.glob('downloads/*')
 
         if not downloaded_files:
             bot.edit_message_text("لم يتم العثور على أي ملفات قابلة للتحميل في هذا الرابط. ❌", message.chat.id, msg.message_id)
             return
 
-        # إرسال الملفات (سواء صور أو فيديوهات) ثم حذفها من السيرفر
+        # إرسال الملفات للمستخدم
         for file_path in downloaded_files:
             ext = file_path.split('.')[-1].lower()
             with open(file_path, 'rb') as file_data:
@@ -69,17 +69,14 @@ def handle_download(message):
                 else:
                     bot.send_document(message.chat.id, file_data)
             
-            # حذف الملف بعد الإرسال لتوفير المساحة
             os.remove(file_path)
 
         bot.delete_message(message.chat.id, msg.message_id)
 
     except Exception as e:
-        # تنظيف مجلد التحميلات عند وقوع أي خطأ
         for f in glob.glob('downloads/*'):
             try: os.remove(f)
             except: pass
         bot.edit_message_text(f"عذراً، حدث خطأ أثناء التحميل: ❌\n{str(e)}", message.chat.id, msg.message_id, parse_mode='Markdown')
 
-# تشغيل الاستماع للبوت
 bot.polling(non_stop=True)
