@@ -1,4 +1,3 @@
-،s a, [29/07/26 08:56 م]
 import os
 import glob
 import re
@@ -116,7 +115,7 @@ def handle_download(message):
                         bot.send_video(message.chat.id, file_data)
                     else:
 
-،s a, [29/07/26 08:56 م]
+،s a, [29/07/26 08:59 م]
 bot.send_document(message.chat.id, file_data)
                 os.remove(file_path)
             bot.delete_message(message.chat.id, msg.message_id)
