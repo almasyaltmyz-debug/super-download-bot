@@ -38,6 +38,44 @@ def extract_clean_url(text):
     match = re.search(r'https?://[^\s]+', text)
     return match.group(0) if match else None
 
+def download_instagram_fallback(url):
+    """تنزيل الفيديو أو الصور من إنستغرام بذكاء (إعطاء الأولوية للفيديو)"""
+    try:
+        shortcode_match = re.search(r'/(?:p|reel|reels|tv)/([^/?#&]+)', url)
+        if shortcode_match:
+            shortcode = shortcode_match.group(1)
+            post = instaloader.Post.from_shortcode(L.context, shortcode)
+            
+            # 1. إذا كان المنشور عبارة عن ألبوم (مزيج صور/فيديوهات)
+            if post.typename == 'GraphSidecar':
+                for i, node in enumerate(post.get_sidecar_nodes()):
+                    if node.is_video:
+                        vid_data = requests.get(node.video_url, headers=HEADERS).content
+                        with open(f"downloads/insta_vid_{i}.mp4", "wb") as f:
+                            f.write(vid_data)
+                    else:
+                        img_data = requests.get(node.display_url, headers=HEADERS).content
+                        with open(f"downloads/insta_img_{i}.jpg", "wb") as f:
+                            f.write(img_data)
+                return True
+
+            # 2. إذا كان المنشور فيديو أو Reel صريح
+            elif post.is_video:
+                vid_data = requests.get(post.video_url, headers=HEADERS).content
+                with open("downloads/insta_video.mp4", "wb") as f:
+                    f.write(vid_data)
+                return True
+
+            # 3. إذا كان المنشور صورة فقط
+            else:
+                img_data = requests.get(post.url, headers=HEADERS).content
+                with open("downloads/insta_single.jpg", "wb") as f:
+                    f.write(img_data)
+                return True
+    except Exception as e:
+        print(f"Instaloader Error: {e}")
+    return False
+
 def download_tiktok_media(url):
     """تنزيل صور وفيديوهات تيك توك عبر TikWM API"""
     try:
@@ -46,8 +84,6 @@ def download_tiktok_media(url):
         
         if response.get('code') == 0:
             data = response.get('data', {})
-            
-            # إذا كان المنشور عبارة عن صور متعدّدة (Photo Slide)
             images = data.get('images')
             if images:
                 for i, img_url in enumerate(images):
@@ -56,7 +92,6 @@ def download_tiktok_media(url):
                         f.write(img_data)
                 return True
 
-            # إذا كان فيديو عادي
             video_url = data.get('play') or data.get('wmplay')
             if video_url:
                 vid_data = requests.get(video_url, headers=HEADERS).content
@@ -65,28 +100,6 @@ def download_tiktok_media(url):
                 return True
     except Exception as e:
         print(f"TikTok API Error: {e}")
-    return False
-
-def download_instagram_fallback(url):
-    """تنزيل الصور والفيديوهات من إنستغرام"""
-    try:
-        shortcode_match = re.search(r'/(?:p|reel|tv)/([^/?#&]+)', url)
-        if shortcode_match:
-            shortcode = shortcode_match.group(1)
-            post = instaloader.Post.from_shortcode(L.context, shortcode)
-            
-            if post.typename == 'GraphSidecar':
-                for i, node in enumerate(post.get_sidecar_nodes()):
-                    img_data = requests.get(node.display_url, headers=HEADERS).content
-                    with open(f"downloads/insta_{i}.jpg", "wb") as f:
-                        f.write(img_data)
-            else:
-                img_data = requests.get(post.url, headers=HEADERS).content
-                with open("downloads/insta_single.jpg", "wb") as f:
-                    f.write(img_data)
-            return True
-    except Exception as e:
-        print(f"Instaloader Error: {e}")
     return False
 
 def download_pinterest_fallback(url):
@@ -104,6 +117,7 @@ def download_pinterest_fallback(url):
             img_url = img_match.group(1) if 'content=' in img_match.group(0) or img_match.lastindex else img_match.group(0)
             img_url = img_url.replace("&amp;", "&")
             img_url = re.sub(r'/\d+x/', '/originals/', img_url)
+
             img_data = requests.get(img_url, headers=HEADERS, timeout=15).content
             with open("downloads/pinterest_image.jpg", "wb") as f:
                 f.write(img_data)
@@ -124,19 +138,19 @@ def handle_download(message):
     msg = bot.reply_to(message, "جاري معالجة الرابط وجلب المحتوى... ⏳")
     os.makedirs('downloads', exist_ok=True)
 
-    # 1. تيك توك (TikTok): صور أو فيديوهات
+    # 1. تيك توك
     if 'tiktok.com' in url:
         download_tiktok_media(url)
 
-    # 2. إنستغرام (Instagram)
+    # 2. إنستغرام (فيديو أو صورة بذكاء)
     elif 'instagram.com' in url:
         download_instagram_fallback(url)
 
-    # 3. بنترست (Pinterest)
+    # 3. بنترست
     elif 'pinterest.' in url or 'pin.it' in url:
         download_pinterest_fallback(url)
 
-    # 4. باقي المنصات (YouTube / Twitter / الخ): استخدام yt-dlp
+    # 4. باقي المنصات (YouTube/Twitter)
     else:
         try:
             ydl_opts = {
