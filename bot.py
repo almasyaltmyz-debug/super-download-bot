@@ -114,7 +114,8 @@ def download_tiktok_media(url):
                 return True
     except Exception as e:
         print(f"TikTok API Error: {e}")
-    return Falsedef download_pinterest_fallback(url):
+    return Falsedef 
+    download_pinterest_fallback(url):
     """فك روابط بنترست المختصرة وجلب الصورة بجودتها الأصلية"""
     try:
         session = requests.Session()
