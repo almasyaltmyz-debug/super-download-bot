@@ -114,8 +114,7 @@ def download_tiktok_media(url):
                 return True
     except Exception as e:
         print(f"TikTok API Error: {e}")
-    return False
-    def download_pinterest_fallback(url):
+    return Falsedef download_pinterest_fallback(url):
     """فك روابط بنترست المختصرة وجلب الصورة بجودتها الأصلية"""
     try:
         session = requests.Session()
@@ -203,3 +202,4 @@ def handle_download(message):
         bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. قد يكون المنشور خاصاً أو غير مدعوم. ❌", message.chat.id, msg.message_id)
 
 bot.polling(non_stop=True)
+    
