@@ -114,8 +114,9 @@ def download_tiktok_media(url):
                 return True
     except Exception as e:
         print(f"TikTok API Error: {e}")
-    return False 
-    def download_pinterest_fallback(url):
+    return False
+
+def download_pinterest_fallback(url):
     """فك روابط بنترست المختصرة وجلب الصورة بجودتها الأصلية"""
     try:
         session = requests.Session()
@@ -159,7 +160,7 @@ def handle_download(message):
     elif 'instagram.com' in url:
         download_instagram_fallback(url)
 
-    # 3. فيسبوك (Facebook Videos & Reels)
+    # 3. فيسبوك
     elif 'facebook.com' in url or 'fb.watch' in url or 'fb.gg' in url:
         download_facebook_media(url)
 
@@ -198,7 +199,7 @@ def handle_download(message):
                 os.remove(file_path)
             bot.delete_message(message.chat.id, msg.message_id)
         except Exception as e:
-            bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: ❌\n{str(e)}", message.chat.id, msg.message_id, parse_mode='Markdown')
+            bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: ❌\n`{str(e)}`", message.chat.id, msg.message_id, parse_mode='Markdown')
     else:
         bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. قد يكون المنشور خاصاً أو غير مدعوم. ❌", message.chat.id, msg.message_id)
 
