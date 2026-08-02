@@ -9,11 +9,10 @@ from telebot import apihelper
 import yt_dlp
 import instaloader
 
-# زيادة مهلة الاتصال والرفع لمنع خطأ TimeoutError عند رفع الفيديوهات الكبيرة
+# زيادة مهلة الاتصال والرفع
 apihelper.CONNECT_TIMEOUT = 120
 apihelper.READ_TIMEOUT = 300
 
-# --- 1. سيرفر Flask المدمج لإبقاء البوت شغالاً 24/7 ---
 app = Flask('')
 
 @app.route('/')
@@ -30,7 +29,6 @@ def keep_alive():
 
 keep_alive()
 
-# --- 2. توكين البوت الخاص بك ---
 TOKEN = '8960864210:AAGg1wQKE5_kwh05FTXPvA30xhc-IrnJrdk'
 bot = telebot.TeleBot(TOKEN)
 L = instaloader.Instaloader(download_videos=True, download_video_thumbnails=False, save_metadata=False, post_metadata_txt_pattern="")
@@ -44,13 +42,13 @@ def extract_clean_url(text):
     return match.group(0) if match else None
 
 def download_facebook_media(url):
-    """تنزيل الفيديوهات من فيسبوك عبر yt-dlp بأفضل جودة"""
+    """تنزيل الفيديوهات من فيسبوك بجودة متوسطة لتجنب حجم الملف الكبير"""
     try:
         ydl_opts = {
             'outtmpl': 'downloads/fb_%(id)s.%(ext)s',
             'quiet': True,
             'no_warnings': True,
-            'format': 'bestvideo+bestaudio/best',
+            'format': 'best[height<=720]/best',  # تحديد جودة 720p كحد أقصى لتجنب حجم الملف الضخم
             'user_agent': HEADERS['User-Agent'],
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -61,7 +59,6 @@ def download_facebook_media(url):
     return False
 
 def download_instagram_fallback(url):
-    """تنزيل الفيديو أو الصور من إنستغرام بذكاء"""
     try:
         shortcode_match = re.search(r'/(?:p|reel|reels|tv)/([^/?#&]+)', url)
         if shortcode_match:
@@ -96,7 +93,6 @@ def download_instagram_fallback(url):
     return False
 
 def download_tiktok_media(url):
-    """تنزيل صور وفيديوهات تيك توك عبر TikWM API"""
     try:
         api_url = f"https://www.tikwm.com/api/?url={url}"
         response = requests.get(api_url, headers=HEADERS, timeout=15).json()
@@ -122,7 +118,6 @@ def download_tiktok_media(url):
     return False
 
 def download_pinterest_fallback(url):
-    """فك روابط بنترست المختصرة وجلب الصورة بجودتها الأصلية"""
     try:
         session = requests.Session()
         response = session.get(url, headers=HEADERS, allow_redirects=True, timeout=15)
@@ -157,29 +152,21 @@ def handle_download(message):
     msg = bot.reply_to(message, "جاري معالجة الرابط وجلب المحتوى... ⏳")
     os.makedirs('downloads', exist_ok=True)
 
-    # 1. تيك توك
     if 'tiktok.com' in url:
         download_tiktok_media(url)
-
-    # 2. إنستغرام
     elif 'instagram.com' in url:
         download_instagram_fallback(url)
-
-    # 3. فيسبوك
     elif 'facebook.com' in url or 'fb.watch' in url or 'fb.gg' in url:
         download_facebook_media(url)
-
-    # 4. بنترست
     elif 'pinterest.' in url or 'pin.it' in url:
         download_pinterest_fallback(url)
-
-    # 5. باقي المنصات (YouTube/Twitter)
     else:
         try:
             ydl_opts = {
                 'outtmpl': 'downloads/%(id)s.%(ext)s',
                 'quiet': True,
                 'no_warnings': True,
+                'format': 'best[height<=720]/best',
                 'user_agent': HEADERS['User-Agent'],
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -187,7 +174,6 @@ def handle_download(message):
         except Exception:
             pass
 
-    # إرسال الملفات المُنَزَّلة
     downloaded_files = glob.glob('downloads/*')
 
     if downloaded_files:
@@ -204,7 +190,7 @@ def handle_download(message):
                 os.remove(file_path)
             bot.delete_message(message.chat.id, msg.message_id)
         except Exception as e:
-            bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: ❌\n`{str(e)}`", message.chat.id, msg.message_id, parse_mode='Markdown')
+            bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف (قد يكون الحجم كبيراً جداً على تليجرام): ❌\n`{str(e)}`", message.chat.id, msg.message_id, parse_mode='Markdown')
     else:
         bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. قد يكون المنشور خاصاً أو غير مدعوم. ❌", message.chat.id, msg.message_id)
 
