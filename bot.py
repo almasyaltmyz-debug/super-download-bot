@@ -38,15 +38,31 @@ def extract_clean_url(text):
     match = re.search(r'https?://[^\s]+', text)
     return match.group(0) if match else None
 
+def download_facebook_media(url):
+    """تنزيل الفيديوهات من فيسبوك عبر yt-dlp بأفضل جودة"""
+    try:
+        ydl_opts = {
+            'outtmpl': 'downloads/fb_%(id)s.%(ext)s',
+            'quiet': True,
+            'no_warnings': True,
+            'format': 'bestvideo+bestaudio/best',
+            'user_agent': HEADERS['User-Agent'],
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        return True
+    except Exception as e:
+        print(f"Facebook Error: {e}")
+    return False
+
 def download_instagram_fallback(url):
-    """تنزيل الفيديو أو الصور من إنستغرام بذكاء (إعطاء الأولوية للفيديو)"""
+    """تنزيل الفيديو أو الصور من إنستغرام بذكاء"""
     try:
         shortcode_match = re.search(r'/(?:p|reel|reels|tv)/([^/?#&]+)', url)
         if shortcode_match:
             shortcode = shortcode_match.group(1)
             post = instaloader.Post.from_shortcode(L.context, shortcode)
             
-            # 1. إذا كان المنشور عبارة عن ألبوم (مزيج صور/فيديوهات)
             if post.typename == 'GraphSidecar':
                 for i, node in enumerate(post.get_sidecar_nodes()):
                     if node.is_video:
@@ -59,14 +75,12 @@ def download_instagram_fallback(url):
                             f.write(img_data)
                 return True
 
-            # 2. إذا كان المنشور فيديو أو Reel صريح
             elif post.is_video:
                 vid_data = requests.get(post.video_url, headers=HEADERS).content
                 with open("downloads/insta_video.mp4", "wb") as f:
                     f.write(vid_data)
                 return True
 
-            # 3. إذا كان المنشور صورة فقط
             else:
                 img_data = requests.get(post.url, headers=HEADERS).content
                 with open("downloads/insta_single.jpg", "wb") as f:
@@ -101,8 +115,7 @@ def download_tiktok_media(url):
     except Exception as e:
         print(f"TikTok API Error: {e}")
     return False
-
-def download_pinterest_fallback(url):
+    def download_pinterest_fallback(url):
     """فك روابط بنترست المختصرة وجلب الصورة بجودتها الأصلية"""
     try:
         session = requests.Session()
@@ -142,15 +155,19 @@ def handle_download(message):
     if 'tiktok.com' in url:
         download_tiktok_media(url)
 
-    # 2. إنستغرام (فيديو أو صورة بذكاء)
+    # 2. إنستغرام
     elif 'instagram.com' in url:
         download_instagram_fallback(url)
 
-    # 3. بنترست
+    # 3. فيسبوك (Facebook Videos & Reels)
+    elif 'facebook.com' in url or 'fb.watch' in url or 'fb.gg' in url:
+        download_facebook_media(url)
+
+    # 4. بنترست
     elif 'pinterest.' in url or 'pin.it' in url:
         download_pinterest_fallback(url)
 
-    # 4. باقي المنصات (YouTube/Twitter)
+    # 5. باقي المنصات (YouTube/Twitter)
     else:
         try:
             ydl_opts = {
@@ -183,6 +200,6 @@ def handle_download(message):
         except Exception as e:
             bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: ❌\n{str(e)}", message.chat.id, msg.message_id, parse_mode='Markdown')
     else:
-        bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. قد يكون خاصاً أو غير مدعوم. ❌", message.chat.id, msg.message_id)
+        bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. قد يكون المنشور خاصاً أو غير مدعوم. ❌", message.chat.id, msg.message_id)
 
 bot.polling(non_stop=True)
