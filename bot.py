@@ -5,8 +5,13 @@ import requests
 from threading import Thread
 from flask import Flask
 import telebot
+from telebot import apihelper
 import yt_dlp
 import instaloader
+
+# زيادة مهلة الاتصال والرفع لمنع خطأ TimeoutError عند رفع الفيديوهات الكبيرة
+apihelper.CONNECT_TIMEOUT = 120
+apihelper.READ_TIMEOUT = 300
 
 # --- 1. سيرفر Flask المدمج لإبقاء البوت شغالاً 24/7 ---
 app = Flask('')
@@ -191,11 +196,11 @@ def handle_download(message):
                 ext = file_path.split('.')[-1].lower()
                 with open(file_path, 'rb') as file_data:
                     if ext in ['jpg', 'jpeg', 'png', 'webp']:
-                        bot.send_photo(message.chat.id, file_data)
+                        bot.send_photo(message.chat.id, file_data, timeout=120)
                     elif ext in ['mp4', 'mkv', 'webm', 'mov']:
-                        bot.send_video(message.chat.id, file_data)
+                        bot.send_video(message.chat.id, file_data, timeout=300)
                     else:
-                        bot.send_document(message.chat.id, file_data)
+                        bot.send_document(message.chat.id, file_data, timeout=300)
                 os.remove(file_path)
             bot.delete_message(message.chat.id, msg.message_id)
         except Exception as e:
