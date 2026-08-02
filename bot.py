@@ -202,4 +202,3 @@ def handle_download(message):
         bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. قد يكون المنشور خاصاً أو غير مدعوم. ❌", message.chat.id, msg.message_id)
 
 bot.polling(non_stop=True)
-    
