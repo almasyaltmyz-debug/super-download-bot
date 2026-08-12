@@ -1,3 +1,4 @@
+،s a, [12/08/26 03:19 م]
 import os
 import glob
 import re
@@ -115,7 +116,7 @@ def download_instagram_fallback(url):
                 with open("downloads/insta_video.mp4", "wb") as f:
                     f.write(vid_data)
                 return True
-                else:
+else:
                 img_data = requests.get(post.url, headers=HEADERS).content
                 with open("downloads/insta_single.jpg", "wb") as f:
                     f.write(img_data)
