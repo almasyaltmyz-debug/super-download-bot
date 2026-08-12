@@ -41,14 +41,47 @@ def extract_clean_url(text):
     match = re.search(r'https?://[^\s]+', text)
     return match.group(0) if match else None
 
+def download_tiktok_media(url):
+    """تنزيل من تيك توك باستخدام yt-dlp ومحاولة محرك TikWM كخيار احتياطي"""
+    try:
+        ydl_opts = {
+            'outtmpl': 'downloads/tiktok_%(id)s.%(ext)s',
+            'quiet': True,
+            'no_warnings': True,
+            'format': 'bestvideo+bestaudio/best',
+            'user_agent': HEADERS['User-Agent'],
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        if glob.glob('downloads/tiktok_*'):
+            return True
+    except Exception as e:
+        print(f"TikTok yt-dlp Error: {e}")
+
+    # محاولة سريعة عبر API احتياطي في حال كان المنشور معرض صور (Photo Slideshow)
+    try:
+        api_url = f"https://www.tikwm.com/api/?url={url}"
+        response = requests.get(api_url, headers=HEADERS, timeout=10).json()
+        if response.get('code') == 0:
+            data = response.get('data', {})
+            images = data.get('images')
+            if images:
+                for i, img_url in enumerate(images):
+                    img_data = requests.get(img_url, headers=HEADERS).content
+                    with open(f"downloads/tiktok_img_{i}.jpg", "wb") as f:
+                        f.write(img_data)
+                return True
+    except Exception as e:
+        print(f"TikTok API Error: {e}")
+    return False
+
 def download_facebook_media(url):
-    """تنزيل الفيديوهات من فيسبوك بجودة متوسطة لتجنب حجم الملف الكبير"""
     try:
         ydl_opts = {
             'outtmpl': 'downloads/fb_%(id)s.%(ext)s',
             'quiet': True,
             'no_warnings': True,
-            'format': 'best[height<=720]/best',  # تحديد جودة 720p كحد أقصى لتجنب حجم الملف الضخم
+            'format': 'best[height<=720]/best',
             'user_agent': HEADERS['User-Agent'],
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -82,39 +115,13 @@ def download_instagram_fallback(url):
                 with open("downloads/insta_video.mp4", "wb") as f:
                     f.write(vid_data)
                 return True
-
-            else:
+                else:
                 img_data = requests.get(post.url, headers=HEADERS).content
                 with open("downloads/insta_single.jpg", "wb") as f:
                     f.write(img_data)
                 return True
     except Exception as e:
         print(f"Instaloader Error: {e}")
-    return False
-
-def download_tiktok_media(url):
-    try:
-        api_url = f"https://www.tikwm.com/api/?url={url}"
-        response = requests.get(api_url, headers=HEADERS, timeout=15).json()
-        
-        if response.get('code') == 0:
-            data = response.get('data', {})
-            images = data.get('images')
-            if images:
-                for i, img_url in enumerate(images):
-                    img_data = requests.get(img_url, headers=HEADERS).content
-                    with open(f"downloads/tiktok_img_{i}.jpg", "wb") as f:
-                        f.write(img_data)
-                return True
-
-            video_url = data.get('play') or data.get('wmplay')
-            if video_url:
-                vid_data = requests.get(video_url, headers=HEADERS).content
-                with open("downloads/tiktok_video.mp4", "wb") as f:
-                    f.write(vid_data)
-                return True
-    except Exception as e:
-        print(f"TikTok API Error: {e}")
     return False
 
 def download_pinterest_fallback(url):
@@ -152,7 +159,7 @@ def handle_download(message):
     msg = bot.reply_to(message, "جاري معالجة الرابط وجلب المحتوى... ⏳")
     os.makedirs('downloads', exist_ok=True)
 
-    if 'tiktok.com' in url:
+    if 'tiktok.com' in url or 'vt.tiktok.com' in url:
         download_tiktok_media(url)
     elif 'instagram.com' in url:
         download_instagram_fallback(url)
@@ -190,7 +197,7 @@ def handle_download(message):
                 os.remove(file_path)
             bot.delete_message(message.chat.id, msg.message_id)
         except Exception as e:
-            bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف (قد يكون الحجم كبيراً جداً على تليجرام): ❌\n`{str(e)}`", message.chat.id, msg.message_id, parse_mode='Markdown')
+            bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: ❌\n{str(e)}", message.chat.id, msg.message_id, parse_mode='Markdown')
     else:
         bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. قد يكون المنشور خاصاً أو غير مدعوم. ❌", message.chat.id, msg.message_id)
 
