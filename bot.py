@@ -1,4 +1,3 @@
-،s a, [12/08/26 03:19 م]
 import os
 import glob
 import re
