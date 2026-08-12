@@ -58,7 +58,6 @@ def download_tiktok_media(url):
     except Exception as e:
         print(f"TikTok yt-dlp Error: {e}")
 
-    # محاولة سريعة عبر API احتياطي في حال كان المنشور معرض صور (Photo Slideshow)
     try:
         api_url = f"https://www.tikwm.com/api/?url={url}"
         response = requests.get(api_url, headers=HEADERS, timeout=10).json()
@@ -115,7 +114,8 @@ def download_instagram_fallback(url):
                 with open("downloads/insta_video.mp4", "wb") as f:
                     f.write(vid_data)
                 return True
-else:
+
+            else:
                 img_data = requests.get(post.url, headers=HEADERS).content
                 with open("downloads/insta_single.jpg", "wb") as f:
                     f.write(img_data)
@@ -197,7 +197,7 @@ def handle_download(message):
                 os.remove(file_path)
             bot.delete_message(message.chat.id, msg.message_id)
         except Exception as e:
-            bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: ❌\n{str(e)}", message.chat.id, msg.message_id, parse_mode='Markdown')
+            bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: ❌\n`{str(e)}`", message.chat.id, msg.message_id, parse_mode='Markdown')
     else:
         bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. قد يكون المنشور خاصاً أو غير مدعوم. ❌", message.chat.id, msg.message_id)
 
