@@ -193,33 +193,37 @@ def handle_download(message):
         except Exception:
             pass
 
-    downloaded_files = glob.glob('downloads/*')
-
-    if downloaded_files:
-        try:
-            for file_path in downloaded_files:
-                ext = file_path.split('.')[-1].lower()
-    if ext in ['jpg', 'jpeg', 'png', 'webp']:
+   if downloaded_files:
+    try:
+        for file_path in downloaded_files:
+            ext = file_path.split('.')[-1].lower()
+            
+            if ext in ['jpg', 'jpeg', 'png', 'webp']:
                 with open(file_path, 'rb') as file_data:
                     bot.send_photo(message.chat.id, file_data, timeout=120)
                 os.remove(file_path)
+                
             elif ext in ['mp4', 'mkv', 'webm', 'mov']:
                 temp_video_path = f"downloads/temp_{os.path.basename(file_path)}"
                 os.rename(file_path, temp_video_path)
+                
                 with open(temp_video_path, 'rb') as video_file:
                     markup = InlineKeyboardMarkup()
                     btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"extract_{os.path.basename(temp_video_path)}")
                     markup.add(btn)
-                    bot.send_video(message.chat.id, video_file, caption="تم تنزيل الفيديو بنجاح! 🎬", reply_markup=markup, timeout=300)
+                    bot.send_video(message.chat.id, video_file, caption="تم تنزيل الفيديو بنجاح! 🎬", reply_markup=markup)
+                    
             else:
                 with open(file_path, 'rb') as file_data:
                     bot.send_document(message.chat.id, file_data, timeout=300)
                 os.remove(file_path)
-            bot.delete_message(message.chat.id, msg.message_id)
-        except Exception as e:
-            bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: ❌\n`{str(e)}`", message.chat.id, msg.message_id, parse_mode='Markdown')
-    else:
-        bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. قد يكون المنشور خاصاً أو غير مدعوم. ❌", message.chat.id, msg.message_id)
+
+        bot.delete_message(message.chat.id, msg.message_id)
+
+    except Exception as e:
+        bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: {str(e)}", message.chat.id, msg.message_id)
+else:
+    bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط.", message.chat.id, msg.message_id)
 
 bot.polling(non_stop=True)
 @bot.callback_query_handler(func=lambda call: call.data.startswith('extract_'))
