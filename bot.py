@@ -1,3 +1,5 @@
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from moviepy.editor import VideoFileClip
 import os
 import glob
 import re
@@ -8,7 +10,17 @@ import telebot
 from telebot import apihelper
 import yt_dlp
 import instaloader
-
+def extract_audio_from_video(video_path):
+    """استخراج الصوت وتحويله إلى MP3"""
+    try:
+        audio_path = video_path.rsplit('.', 1)[0] + '.mp3'
+        video = VideoFileClip(video_path)
+        video.audio.write_audiofile(audio_path, logger=None)
+        video.close()
+        return audio_path
+    except Exception as e:
+        print(f"Audio extraction error: {e}")
+        return None
 # زيادة مهلة الاتصال والرفع
 apihelper.CONNECT_TIMEOUT = 120
 apihelper.READ_TIMEOUT = 300
