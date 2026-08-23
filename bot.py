@@ -9,7 +9,7 @@ from telebot import apihelper
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import yt_dlp
 import instaloader
-from moviepy.editor import VideoFileClip
+from moviepy import VideoFileClip
 
 # دالة استخراج الصوت من الفيديو
 def extract_audio_from_video(video_path):
