@@ -68,7 +68,7 @@ def send_welcome(message):
 def clean_url(url):
     return url.split('?')[0]
 
-# معالج الصور لاستخراج النص العربي عبر OCR.Space API (Engine 1 + ara)
+# معالج الصور لاستخراج النص العربي المضمون عبر OCR.Space API (Engine 3 + ara)
 @bot.message_handler(content_types=['photo'])
 def handle_photo_ocr(message):
     msg = bot.reply_to(message, "جاري قراءة النص العربي من الصورة... 🔍")
@@ -79,7 +79,7 @@ def handle_photo_ocr(message):
         payload = {
             'apikey': 'helloworld',
             'language': 'ara',
-            'OCREngine': 1,
+            'OCREngine': 3,
             'isOverlayRequired': False,
             'detectOrientation': 'true',
             'scale': 'true'
