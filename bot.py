@@ -78,13 +78,13 @@ def handle_photo_ocr(message):
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
+        # المحاولة الأولى باللغة العربية مع المحرك الافتراضي المضمون
         payload = {
             'apikey': OCR_API_KEY,
-            'language': 'ara',  # الرمز الرسمي للغة العربية
+            'language': 'ara',
             'isOverlayRequired': False,
-            'detectOrientation': True,
-            'scale': True,
-            'OCREngine': 1     # استخدام المحرك الأول المتوافق بنسبة 100% مع رمز ara
+            'detectOrientation': 'true',
+            'scale': 'true'
         }
         
         response = requests.post(
@@ -100,11 +100,30 @@ def handle_photo_ocr(message):
             extracted_text = result['ParsedResults'][0]['ParsedText'].strip()
             if extracted_text:
                 bot.edit_message_text(f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}", message.chat.id, msg.message_id)
-            else:
-                bot.edit_message_text("عذراً، لم يتم العثور على نص واضح داخل الصورة. ❌", message.chat.id, msg.message_id)
-        else:
-            error_msg = result.get('ErrorMessage', ['حدث خطأ في قراءة الصورة'])[0]
-            bot.edit_message_text(f"لم نتمكن من قراءة الصورة: {error_msg} ❌", message.chat.id, msg.message_id)
+                return
+
+        # المحاولة الاحتياطية بدون تحديد لغة في حال وجود أخطاء في الرمز
+        payload_fallback = {
+            'apikey': OCR_API_KEY,
+            'isOverlayRequired': False,
+            'detectOrientation': 'true',
+            'scale': 'true'
+        }
+        
+        res_fb = requests.post(
+            'https://api.ocr.space/parse/image',
+            files={'filename': ('image.jpg', downloaded_file, 'image/jpeg')},
+            data=payload_fallback,
+            timeout=60
+        ).json()
+        
+        if res_fb.get('OCRExitCode') == 1 and res_fb.get('ParsedResults'):
+            extracted_text = res_fb['ParsedResults'][0]['ParsedText'].strip()
+            if extracted_text:
+                bot.edit_message_text(f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}", message.chat.id, msg.message_id)
+                return
+
+        bot.edit_message_text("عذراً، لم يتم العثور على نص واضح داخل الصورة. ❌", message.chat.id, msg.message_id)
 
     except requests.exceptions.Timeout:
         bot.edit_message_text("تأخرت الاستجابة من السيرفر، يرجى المحاولة مرة أخرى بصورة أصغر حجماً. ⏳", message.chat.id, msg.message_id)
