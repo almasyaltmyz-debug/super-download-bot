@@ -9,7 +9,11 @@ from telebot import apihelper
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import yt_dlp
 import instaloader
-from moviepy import VideoFileClip
+
+try:
+    from moviepy.editor import VideoFileClip
+except ImportError:
+    from moviepy import VideoFileClip
 
 # دالة استخراج الصوت من الفيديو
 def extract_audio_from_video(video_path):
@@ -44,6 +48,7 @@ def keep_alive():
 keep_alive()
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
+OCR_API_KEY = os.environ.get('OCR_API_KEY', 'helloworld')
 bot = telebot.TeleBot(BOT_TOKEN)
 
 HEADERS = {
@@ -53,25 +58,59 @@ HEADERS = {
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     welcome_text = (
-        "أهلاً بك في بوت التحميل الشامل! 🚀\n\n"
-        "أرسل لي أي رابط من المنصات التالية وسأقوم بتحميله لك فوراً:\n"
-        "• يوتيوب (فيديو أو شورتس)\n"
-        "• إنستغرام (ريلز، منشورات، ستوري)\n"
-        "• تيك توك\n"
-        "• فيسبوك، تويتر (X)، بينترست، تيك توك وغيرها الكثير!\n\n"
-        "💡 كما يمكنك استخراج الصوت من أي فيديو بنقرة زر واحدة!"
+        "أهلاً بك في بوت التحميل واستخراج النصوص الشامل! 🚀\n\n"
+        "✨ **ماذا يمكنني أن أفعل لك؟**\n"
+        "1️⃣ **تنزيل الوسائط:** أرسل لي رابطاً من (يوتيوب، إنستغرام، تيك توك، فيسبوك، إلخ).\n"
+        "2️⃣ **استخراج الصوت:** اضغط على زر 'استخراج الصوت' تحت أي فيديو يتم تنزيله.\n"
+        "3️⃣ **استخراج النص من الصور (OCR):** أرسل لي أي صورة تحتوي على نص عربي أو إنجليزي وسأقوم بقراءته واستخراجه فوراً!"
     )
     bot.reply_to(message, welcome_text)
 
 def clean_url(url):
     return url.split('?')[0]
 
+# معالج الصور لاستخراج النص (OCR)
+@bot.message_handler(content_types=['photo'])
+def handle_photo_ocr(message):
+    msg = bot.reply_to(message, "جاري قراءة النص من الصورة... 🔍")
+    
+    try:
+        file_info = bot.get_file(message.photo[-1].file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        payload = {
+            'apikey': OCR_API_KEY,
+            'language': 'ara',  # لدعم اللغة العربية
+            'isOverlayRequired': False
+        }
+        
+        response = requests.post(
+            'https://api.ocr.space/parse/image',
+            files={'filename': ('image.jpg', downloaded_file, 'image/jpeg')},
+            data=payload
+        )
+        
+        result = response.json()
+        
+        if result.get('ParsedResults'):
+            extracted_text = result['ParsedResults'][0]['ParsedText'].strip()
+            if extracted_text:
+                bot.edit_message_text(f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}", message.chat.id, msg.message_id)
+            else:
+                bot.edit_message_text("عذراً، لم يتم العثور على نص واضح داخل الصورة. ❌", message.chat.id, msg.message_id)
+        else:
+            bot.edit_message_text("حدث خطأ أثناء معالجة الصورة. ❌", message.chat.id, msg.message_id)
+
+    except Exception as e:
+        bot.edit_message_text(f"حدث خطأ أثناء المعالجة: {str(e)}", message.chat.id, msg.message_id)
+
+# معالج الرابط والوسائط
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     url = message.text.strip()
     
     if not (url.startswith('http://') or url.startswith('https://')):
-        bot.reply_to(message, "الرجاء إرسال رابط صحيح يتبعه http:// أو https://")
+        bot.reply_to(message, "الرجاء إرسال رابط صحيح يتبعه http:// أو https:// أو إرسال صورة لاستخراج النص منها.")
         return
 
     msg = bot.reply_to(message, "جاري المعالجة والتحميل... ⏳")
@@ -85,7 +124,7 @@ def handle_message(message):
         except Exception:
             pass
 
-    # التعامل مع روابط إنستغرام
+    # إنستغرام
     if 'instagram.com' in url:
         try:
             L = instaloader.Instaloader(
@@ -112,7 +151,7 @@ def handle_message(message):
         except Exception as e:
             print(f"Instaloader error: {e}")
 
-    # التعامل مع بقية المنصات عبر yt-dlp
+    # باقي المنصات عبر yt-dlp
     ydl_opts = {
         'outtmpl': 'downloads/%(id)s.%(ext)s',
         'quiet': True,
@@ -161,7 +200,7 @@ def handle_message(message):
     else:
         bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط.", message.chat.id, msg.message_id)
 
-# معالج الضغط على زر استخراج الصوت
+# معالج استخراج الصوت
 @bot.callback_query_handler(func=lambda call: call.data.startswith('extract_'))
 def handle_audio_extraction(call):
     filename = call.data.replace('extract_', '')
