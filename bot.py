@@ -15,25 +15,6 @@ try:
 except ImportError:
     from moviepy import VideoFileClip
 
-# دالة خفيفة وآمنة للترجمة عبر طلب HTTP مباشر
-def translate_text(text, target_lang='ar'):
-    try:
-        url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            'client': 'gtx',
-            'sl': 'auto',
-            'tl': target_lang,
-            'dt': 't',
-            'q': text
-        }
-        response = requests.get(url, params=params, timeout=10)
-        result = response.json()
-        translated_text = "".join([sentence[0] for sentence in result[0] if sentence[0]])
-        return translated_text
-    except Exception as e:
-        print(f"Translation error: {e}")
-        return None
-
 # دالة استخراج الصوت من الفيديو
 def extract_audio_from_video(video_path):
     try:
@@ -78,15 +59,14 @@ def send_welcome(message):
         "✨ **الخدمات المتاحة:**\n"
         "1️⃣ **تنزيل الوسائط:** أرسل رابط فيديو أو صورة.\n"
         "2️⃣ **استخراج الصوت:** تحويل الفيديو لمقطع صوتي.\n"
-        "3️⃣ **استخراج النصوص (OCR):** قراءة النصوص من الصور.\n"
-        "4️⃣ **الترجمة:** أرسل أي نص لترجمته فوراً أو ترجم النص المستخرج من الصور!"
+        "3️⃣ **استخراج النصوص (OCR):** قراءة النصوص من الصور."
     )
     bot.reply_to(message, welcome_text)
 
 def clean_url(url):
     return url.split('?')[0]
 
-# معالج الصور (OCR) مع إمكانية الترجمة
+# معالج الصور (OCR)
 @bot.message_handler(content_types=['photo'])
 def handle_photo_ocr(message):
     msg = bot.reply_to(message, "جاري قراءة النص العربي من الصورة... 🔍")
@@ -115,16 +95,10 @@ def handle_photo_ocr(message):
         if result.get('OCRExitCode') == 1 and result.get('ParsedResults'):
             extracted_text = result['ParsedResults'][0]['ParsedText'].strip()
             if extracted_text:
-                markup = InlineKeyboardMarkup()
-                markup.add(
-                    InlineKeyboardButton("ترجمة للإنجليزية 🇬🇧", callback_data="tr_en"),
-                    InlineKeyboardButton("ترجمة للعربية 🇸🇦", callback_data="tr_ar")
-                )
                 bot.edit_message_text(
                     f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}",
                     message.chat.id,
-                    msg.message_id,
-                    reply_markup=markup
+                    msg.message_id
                 )
                 return
 
@@ -133,26 +107,7 @@ def handle_photo_ocr(message):
     except Exception as e:
         bot.edit_message_text(f"حدث خطأ أثناء المعالجة: {str(e)}", message.chat.id, msg.message_id)
 
-# معالج أزرار ترجمة الـ OCR
-@bot.callback_query_handler(func=lambda call: call.data.startswith('tr_'))
-def handle_translation_callback(call):
-    target_lang = call.data.split('_')[1]
-    original_text = call.message.text.replace("📝 **النص المستخرج من الصورة:**", "").strip()
-    
-    bot.answer_callback_query(call.id, "جاري الترجمة... 🌐")
-    
-    translated = translate_text(original_text, target_lang)
-    if translated:
-        lang_name = "الإنجليزية" if target_lang == 'en' else "العربية"
-        bot.send_message(
-            call.message.chat.id,
-            f"🌐 **الترجمة إلى {lang_name}:**\n\n{translated}",
-            reply_to_message_id=call.message.message_id
-        )
-    else:
-        bot.send_message(call.message.chat.id, "حدث خطأ أثناء الترجمة. ❌")
-
-# معالج الروابط والنصوص العادية
+# معالج الروابط والوسائط
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     text_input = message.text.strip()
@@ -244,35 +199,7 @@ def handle_message(message):
             bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط.", message.chat.id, msg.message_id)
             
     else:
-        markup = InlineKeyboardMarkup()
-        markup.add(
-            InlineKeyboardButton("إلى الإنجليزية 🇬🇧", callback_data="txt_en"),
-            InlineKeyboardButton("إلى العربية 🇸🇦", callback_data="txt_ar")
-        )
-        bot.reply_to(message, "اختر اللغة التي تريد ترجمة هذا النص إليها:", reply_markup=markup)
-
-# معالج ترجمة النصوص العادية
-@bot.callback_query_handler(func=lambda call: call.data.startswith('txt_'))
-def handle_text_translation(call):
-    target_lang = call.data.split('_')[1]
-    original_text = call.message.reply_to_message.text if call.message.reply_to_message else ""
-    
-    if not original_text:
-        bot.answer_callback_query(call.id, "تعذر العثور على النص الأصلي!", show_alert=True)
-        return
-
-    bot.answer_callback_query(call.id, "جاري الترجمة... 🌐")
-    
-    translated = translate_text(original_text, target_lang)
-    if translated:
-        lang_name = "الإنجليزية" if target_lang == 'en' else "العربية"
-        bot.edit_message_text(
-            f"🌐 **الترجمة ({lang_name}):**\n\n{translated}",
-            call.message.chat.id,
-            call.message.message_id
-        )
-    else:
-        bot.edit_message_text("حدث خطأ أثناء الترجمة. ❌", call.message.chat.id, call.message.message_id)
+        bot.reply_to(message, "يرجى إرسال رابط فيديو/صورة للتنزيل، أو صورة تحتوي على نص لقراءتها. 📌")
 
 # معالج استخراج الصوت
 @bot.callback_query_handler(func=lambda call: call.data.startswith('extract_'))
@@ -298,11 +225,10 @@ def handle_audio_extraction(call):
     else:
         bot.answer_callback_query(call.id, "انتهت صلاحية هذا الملف أو تم حذفه! ❌", show_alert=True)
 
-# تنظيف التحديثات السابقة قبل التشغيل لمنع خطأ 409
+# تنظيف التحديثات السابقة قبل التشغيل لمنع التعارض
 try:
     bot.remove_webhook(drop_pending_updates=True)
 except Exception:
     pass
 
-# تشغيل البوت عبر infinity_polling بدلاً من polling لمنع تعارض Render
 bot.infinity_polling(none_stop=True)
