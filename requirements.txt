@@ -1,6 +1,6 @@
 pyTelegramBotAPI
-yt-dlp
-Flask
 requests
+flask
+yt-dlp
 instaloader
 moviepy
