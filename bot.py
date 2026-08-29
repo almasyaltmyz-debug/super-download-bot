@@ -80,7 +80,7 @@ def handle_photo_ocr(message):
         
         payload = {
             'apikey': OCR_API_KEY,
-            'language': 'ara',
+            'language': 'arabic',  # الترميز الصحيح للغة العربية مع OCREngine 2
             'isOverlayRequired': False,
             'detectOrientation': True,
             'scale': True,
