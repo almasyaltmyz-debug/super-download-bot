@@ -4,3 +4,6 @@ flask
 yt-dlp
 instaloader
 moviepy
+easyocr
+torch
+torchvision
