@@ -15,11 +15,18 @@ try:
 except ImportError:
     from moviepy import VideoFileClip
 
-# دالة خفيفة جداً للترجمة عبر طلب HTTP مباشر بدون مكتبات إضافية
+# دالة خفيفة وآمنة للترجمة عبر طلب HTTP مباشر
 def translate_text(text, target_lang='ar'):
     try:
-        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={target_lang}&dt=t&q={requests.utils.quote(text)}"
-        response = requests.get(url, timeout=10)
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            'client': 'gtx',
+            'sl': 'auto',
+            'tl': target_lang,
+            'dt': 't',
+            'q': text
+        }
+        response = requests.get(url, params=params, timeout=10)
         result = response.json()
         translated_text = "".join([sentence[0] for sentence in result[0] if sentence[0]])
         return translated_text
@@ -79,7 +86,7 @@ def send_welcome(message):
 def clean_url(url):
     return url.split('?')[0]
 
-# معالج الصور (OCR) مع إضافة أزرار الترجمة المباشرة
+# معالج الصور (OCR) مع إمكانية الترجمة
 @bot.message_handler(content_types=['photo'])
 def handle_photo_ocr(message):
     msg = bot.reply_to(message, "جاري قراءة النص العربي من الصورة... 🔍")
@@ -145,12 +152,11 @@ def handle_translation_callback(call):
     else:
         bot.send_message(call.message.chat.id, "حدث خطأ أثناء الترجمة. ❌")
 
-# معالج الروابط والنصوص العادية للترجمة
+# معالج الروابط والنصوص العادية
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     text_input = message.text.strip()
     
-    # إذا كان رابطاً
     if text_input.startswith('http://') or text_input.startswith('https://'):
         msg = bot.reply_to(message, "جاري المعالجة والتحميل... ⏳")
 
@@ -237,7 +243,6 @@ def handle_message(message):
         else:
             bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط.", message.chat.id, msg.message_id)
             
-    # إذا كان نصاً عادياً، يتم عرض أزرار الترجمة
     else:
         markup = InlineKeyboardMarkup()
         markup.add(
@@ -293,5 +298,11 @@ def handle_audio_extraction(call):
     else:
         bot.answer_callback_query(call.id, "انتهت صلاحية هذا الملف أو تم حذفه! ❌", show_alert=True)
 
-# السطر الأخير لتشغيل البوت
-bot.polling(non_stop=True)
+# تنظيف التحديثات السابقة قبل التشغيل لمنع خطأ 409
+try:
+    bot.remove_webhook(drop_pending_updates=True)
+except Exception:
+    pass
+
+# تشغيل البوت عبر infinity_polling بدلاً من polling لمنع تعارض Render
+bot.infinity_polling(none_stop=True)
