@@ -49,12 +49,6 @@ keep_alive()
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# إزالة أي Webhook أو اتصالات معلقة تلقائياً قبل التشغيل لمنع خطأ 409
-try:
-    bot.remove_webhook()
-except Exception as e:
-    print(f"Webhook removal status: {e}")
-
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
 }
@@ -67,7 +61,7 @@ def send_welcome(message):
         "1️⃣ **تنزيل الوسائط:** أرسل رابط فيديو أو صورة.\n"
         "2️⃣ **استخراج الصوت:** تحويل الفيديو لمقطع صوتي.\n"
         "3️⃣ **استخراج النصوص (OCR):** قراءة النصوص من الصور.\n"
-        "4️⃣ **الترجمة:** ترجمة النصوص المستخرجة أو أي نص ترقمه للبوت فوراً!"
+        "4️⃣ **الترجمة:** ترجمة النصوص المستخرجة أو أي نص ترسله للبوت فوراً!"
     )
     bot.reply_to(message, welcome_text)
 
@@ -287,5 +281,11 @@ def handle_audio_extraction(call):
     else:
         bot.answer_callback_query(call.id, "انتهت صلاحية هذا الملف أو تم حذفه! ❌", show_alert=True)
 
-# تشغيل البوت بدون إجباره على التفقد المتكرر المعارض
-bot.infinity_polling(skip_pending_updates=True)
+# إزالة الـ Webhook والتحديثات العالقة لمنع التعارض
+try:
+    bot.remove_webhook(drop_pending_updates=True)
+except Exception as e:
+    print(f"Webhook cleanup status: {e}")
+
+# تشغيل البوت بنجاح
+bot.infinity_polling(none_stop=True)
