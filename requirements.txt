@@ -4,4 +4,3 @@ flask
 yt-dlp
 instaloader
 moviepy
-deep-translator
