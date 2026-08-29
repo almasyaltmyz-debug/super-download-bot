@@ -9,11 +9,15 @@ from telebot import apihelper
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import yt_dlp
 import instaloader
+import easyocr
 
 try:
     from moviepy.editor import VideoFileClip
 except ImportError:
     from moviepy import VideoFileClip
+
+# تهيئة القارئ للغتين العربية والإنجليزية مرة واحدة عند التشغيل
+reader = easyocr.Reader(['ar', 'en'], gpu=False)
 
 # دالة استخراج الصوت من الفيديو
 def extract_audio_from_video(video_path):
@@ -68,42 +72,36 @@ def send_welcome(message):
 def clean_url(url):
     return url.split('?')[0]
 
-# معالج الصور لاستخراج النص (دعم كامل للعربية بدون أخطاء)
+# معالج الصور لاستخراج النص العربي بدقة عبر EasyOCR
 @bot.message_handler(content_types=['photo'])
 def handle_photo_ocr(message):
     msg = bot.reply_to(message, "جاري قراءة النص العربي من الصورة... 🔍")
+    temp_path = None
     try:
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        # إرسال الصورة للمحرك المخصص بقراءة العربية المباشرة (Engine 2 بدون معلمة language)
-        payload = {
-            'apikey': 'helloworld',
-            'OCREngine': 2,
-            'isOverlayRequired': False,
-            'detectOrientation': 'true',
-            'scale': 'true'
-        }
+        if not os.path.exists('downloads'):
+            os.makedirs('downloads')
+            
+        temp_path = f"downloads/ocr_{message.message_id}.jpg"
+        with open(temp_path, 'wb') as new_file:
+            new_file.write(downloaded_file)
+            
+        # قراءة النصوص باللغة العربية والإنجليزية
+        results = reader.readtext(temp_path, detail=0)
+        extracted_text = "\n".join(results).strip()
         
-        response = requests.post(
-            'https://api.ocr.space/parse/image',
-            files={'filename': ('image.jpg', downloaded_file, 'image/jpeg')},
-            data=payload,
-            timeout=60
-        )
-        
-        result = response.json()
-        
-        if result.get('OCRExitCode') == 1 and result.get('ParsedResults'):
-            extracted_text = result['ParsedResults'][0]['ParsedText'].strip()
-            if extracted_text:
-                bot.edit_message_text(f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}", message.chat.id, msg.message_id)
-                return
-
-        bot.edit_message_text("عذراً، لم يتم العثور على نص واضح داخل الصورة. ❌", message.chat.id, msg.message_id)
+        if extracted_text:
+            bot.edit_message_text(f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}", message.chat.id, msg.message_id)
+        else:
+            bot.edit_message_text("عذراً، لم يتم العثور على نص واضح داخل الصورة. ❌", message.chat.id, msg.message_id)
 
     except Exception as e:
         bot.edit_message_text(f"حدث خطأ أثناء المعالجة: {str(e)}", message.chat.id, msg.message_id)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
 # معالج الرابط والوسائط
 @bot.message_handler(func=lambda message: True)
