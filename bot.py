@@ -48,7 +48,6 @@ def keep_alive():
 keep_alive()
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-OCR_API_KEY = os.environ.get('OCR_API_KEY', 'helloworld')
 bot = telebot.TeleBot(BOT_TOKEN)
 
 HEADERS = {
@@ -69,19 +68,19 @@ def send_welcome(message):
 def clean_url(url):
     return url.split('?')[0]
 
-# معالج الصور لاستخراج النص (OCR)
+# معالج الصور لاستخراج النص (دعم كامل للعربية بدون أخطاء)
 @bot.message_handler(content_types=['photo'])
 def handle_photo_ocr(message):
-    msg = bot.reply_to(message, "جاري قراءة النص من الصورة... 🔍")
+    msg = bot.reply_to(message, "جاري قراءة النص العربي من الصورة... 🔍")
     try:
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        # المحاولة الأولى: Engine 2 مخصص للغات الآسيوية والعربية (بدون إرسال معلمة language)
-        payload_engine2 = {
-            'apikey': OCR_API_KEY,
-            'isOverlayRequired': False,
+        # إرسال الصورة للمحرك المخصص بقراءة العربية المباشرة (Engine 2 بدون معلمة language)
+        payload = {
+            'apikey': 'helloworld',
             'OCREngine': 2,
+            'isOverlayRequired': False,
             'detectOrientation': 'true',
             'scale': 'true'
         }
@@ -89,7 +88,7 @@ def handle_photo_ocr(message):
         response = requests.post(
             'https://api.ocr.space/parse/image',
             files={'filename': ('image.jpg', downloaded_file, 'image/jpeg')},
-            data=payload_engine2,
+            data=payload,
             timeout=60
         )
         
@@ -101,33 +100,8 @@ def handle_photo_ocr(message):
                 bot.edit_message_text(f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}", message.chat.id, msg.message_id)
                 return
 
-        # المحاولة الثانية: Engine 1 مع تحديد اللغة العربية بشكل صريح ('ara')
-        payload_engine1 = {
-            'apikey': OCR_API_KEY,
-            'language': 'ara',
-            'isOverlayRequired': False,
-            'OCREngine': 1,
-            'detectOrientation': 'true',
-            'scale': 'true'
-        }
-        
-        res_e1 = requests.post(
-            'https://api.ocr.space/parse/image',
-            files={'filename': ('image.jpg', downloaded_file, 'image/jpeg')},
-            data=payload_engine1,
-            timeout=60
-        ).json()
-        
-        if res_e1.get('OCRExitCode') == 1 and res_e1.get('ParsedResults'):
-            extracted_text = res_e1['ParsedResults'][0]['ParsedText'].strip()
-            if extracted_text:
-                bot.edit_message_text(f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}", message.chat.id, msg.message_id)
-                return
-
         bot.edit_message_text("عذراً، لم يتم العثور على نص واضح داخل الصورة. ❌", message.chat.id, msg.message_id)
 
-    except requests.exceptions.Timeout:
-        bot.edit_message_text("تأخرت الاستجابة من السيرفر، يرجى المحاولة مرة أخرى. ⏳", message.chat.id, msg.message_id)
     except Exception as e:
         bot.edit_message_text(f"حدث خطأ أثناء المعالجة: {str(e)}", message.chat.id, msg.message_id)
 
