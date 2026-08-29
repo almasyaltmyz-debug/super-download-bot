@@ -49,6 +49,12 @@ keep_alive()
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# إزالة أي Webhook أو اتصالات معلقة تلقائياً قبل التشغيل لمنع خطأ 409
+try:
+    bot.remove_webhook()
+except Exception as e:
+    print(f"Webhook removal status: {e}")
+
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
 }
@@ -140,7 +146,6 @@ def handle_translation_callback(call):
 def handle_message(message):
     text_input = message.text.strip()
     
-    # إذا كان المدخل رابطاً، نفذ عمليات التحميل
     if text_input.startswith('http://') or text_input.startswith('https://'):
         msg = bot.reply_to(message, "جاري المعالجة والتحميل... ⏳")
 
@@ -227,7 +232,6 @@ def handle_message(message):
         else:
             bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط.", message.chat.id, msg.message_id)
             
-    # إذا كان المدخل نصاً عادياً وليس رابطاً، يُعامل كنص يرغب المستخدم في ترجمته
     else:
         markup = InlineKeyboardMarkup()
         markup.add(
@@ -283,4 +287,5 @@ def handle_audio_extraction(call):
     else:
         bot.answer_callback_query(call.id, "انتهت صلاحية هذا الملف أو تم حذفه! ❌", show_alert=True)
 
-bot.polling(non_stop=True)
+# تشغيل البوت بدون إجباره على التفقد المتكرر المعارض
+bot.infinity_polling(skip_pending_updates=True)
