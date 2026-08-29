@@ -77,10 +77,9 @@ def handle_photo_ocr(message):
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        # استخدام Engine 2 المخصص للغة العربية والأفضل دقة
-        payload = {
+        # المحاولة الأولى: Engine 2 مخصص للغات الآسيوية والعربية (بدون إرسال معلمة language)
+        payload_engine2 = {
             'apikey': OCR_API_KEY,
-            'language': 'ara',
             'isOverlayRequired': False,
             'OCREngine': 2,
             'detectOrientation': 'true',
@@ -90,7 +89,7 @@ def handle_photo_ocr(message):
         response = requests.post(
             'https://api.ocr.space/parse/image',
             files={'filename': ('image.jpg', downloaded_file, 'image/jpeg')},
-            data=payload,
+            data=payload_engine2,
             timeout=60
         )
         
@@ -102,24 +101,25 @@ def handle_photo_ocr(message):
                 bot.edit_message_text(f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}", message.chat.id, msg.message_id)
                 return
 
-        # محاولة احتياطية بدون تحديد المحرك في حال واجه المحرك الثاني أي مشكلة
-        payload_fallback = {
+        # المحاولة الثانية: Engine 1 مع تحديد اللغة العربية بشكل صريح ('ara')
+        payload_engine1 = {
             'apikey': OCR_API_KEY,
+            'language': 'ara',
             'isOverlayRequired': False,
             'OCREngine': 1,
             'detectOrientation': 'true',
             'scale': 'true'
         }
         
-        res_fb = requests.post(
+        res_e1 = requests.post(
             'https://api.ocr.space/parse/image',
             files={'filename': ('image.jpg', downloaded_file, 'image/jpeg')},
-            data=payload_fallback,
+            data=payload_engine1,
             timeout=60
         ).json()
         
-        if res_fb.get('OCRExitCode') == 1 and res_fb.get('ParsedResults'):
-            extracted_text = res_fb['ParsedResults'][0]['ParsedText'].strip()
+        if res_e1.get('OCRExitCode') == 1 and res_e1.get('ParsedResults'):
+            extracted_text = res_e1['ParsedResults'][0]['ParsedText'].strip()
             if extracted_text:
                 bot.edit_message_text(f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}", message.chat.id, msg.message_id)
                 return
