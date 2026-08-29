@@ -77,10 +77,12 @@ def handle_photo_ocr(message):
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
+        # استخدام Engine 2 المخصص للغة العربية والأفضل دقة
         payload = {
             'apikey': OCR_API_KEY,
             'language': 'ara',
             'isOverlayRequired': False,
+            'OCREngine': 2,
             'detectOrientation': 'true',
             'scale': 'true'
         }
@@ -98,10 +100,31 @@ def handle_photo_ocr(message):
             extracted_text = result['ParsedResults'][0]['ParsedText'].strip()
             if extracted_text:
                 bot.edit_message_text(f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}", message.chat.id, msg.message_id)
-            else:
-                bot.edit_message_text("عذراً، لم يتم العثور على نص واضح داخل الصورة. ❌", message.chat.id, msg.message_id)
-        else:
-            bot.edit_message_text("تعذر قراءة الصورة، يرجى التأكد من وضوح الخط. ❌", message.chat.id, msg.message_id)
+                return
+
+        # محاولة احتياطية بدون تحديد المحرك في حال واجه المحرك الثاني أي مشكلة
+        payload_fallback = {
+            'apikey': OCR_API_KEY,
+            'isOverlayRequired': False,
+            'OCREngine': 1,
+            'detectOrientation': 'true',
+            'scale': 'true'
+        }
+        
+        res_fb = requests.post(
+            'https://api.ocr.space/parse/image',
+            files={'filename': ('image.jpg', downloaded_file, 'image/jpeg')},
+            data=payload_fallback,
+            timeout=60
+        ).json()
+        
+        if res_fb.get('OCRExitCode') == 1 and res_fb.get('ParsedResults'):
+            extracted_text = res_fb['ParsedResults'][0]['ParsedText'].strip()
+            if extracted_text:
+                bot.edit_message_text(f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}", message.chat.id, msg.message_id)
+                return
+
+        bot.edit_message_text("عذراً، لم يتم العثور على نص واضح داخل الصورة. ❌", message.chat.id, msg.message_id)
 
     except requests.exceptions.Timeout:
         bot.edit_message_text("تأخرت الاستجابة من السيرفر، يرجى المحاولة مرة أخرى. ⏳", message.chat.id, msg.message_id)
