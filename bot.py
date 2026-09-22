@@ -224,12 +224,12 @@ def handle_audio_extraction(call):
     else:
         bot.answer_callback_query(call.id, "انتهت صلاحية هذا الملف أو تم حذفه! ❌", show_alert=True)
 
-# إلغاء الـ Webhook النشط ومسح التحديثات العالقة قبل البدء
+# إلغاء الـ Webhook النشط ومسح جميع التحديثات العالقة قبل البدء
 try:
     bot.remove_webhook(drop_pending_updates=True)
     print("Webhook deleted successfully!")
 except Exception as e:
     print(f"Error removing webhook: {e}")
 
-# تشغيل البوت عبر infinity_polling لمنع تعارضات الجلسات
-bot.infinity_polling(skip_pending_updates=True)
+# تشغيل البوت المباشر بدون أخطاء
+bot.infinity_polling()
