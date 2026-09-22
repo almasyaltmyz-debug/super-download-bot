@@ -34,7 +34,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is alive!"
+    return "Bot is alive and running!"
 
 def run():
     app.run(host='0.0.0.0', port=8080)
@@ -46,7 +46,9 @@ def keep_alive():
 keep_alive()
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-bot = telebot.TeleBot(BOT_TOKEN)
+
+# تعيين threaded=False لتجنب تجميد الخيوط على Render
+bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
@@ -66,7 +68,7 @@ def send_welcome(message):
 def clean_url(url):
     return url.split('?')[0]
 
-# معالج الصور (OCR) باستخدام OCREngine 2 المطور للغة العربية
+# معالج الصور (OCR)
 @bot.message_handler(content_types=['photo'])
 def handle_photo_ocr(message):
     msg = bot.reply_to(message, "جاري قراءة النص العربي من الصورة... 🔍")
@@ -224,12 +226,12 @@ def handle_audio_extraction(call):
     else:
         bot.answer_callback_query(call.id, "انتهت صلاحية هذا الملف أو تم حذفه! ❌", show_alert=True)
 
-# إلغاء الـ Webhook النشط ومسح جميع التحديثات العالقة قبل البدء
+# إلغاء الـ Webhook صراحةً عبر طلب مباشر بسيرفرات تليجرام
 try:
-    bot.remove_webhook(drop_pending_updates=True)
-    print("Webhook deleted successfully!")
+    requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10)
+    print("Webhook cleared successfully via HTTP request")
 except Exception as e:
-    print(f"Error removing webhook: {e}")
+    print(f"Failed to clear webhook: {e}")
 
-# تشغيل البوت المباشر بدون أخطاء
-bot.infinity_polling()
+# البدء المباشر للـ Polling
+bot.polling(none_stop=True, interval=0)
