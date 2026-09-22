@@ -17,7 +17,6 @@ except ImportError:
 
 # دالة استخراج الصوت من الفيديو
 def extract_audio_from_video(video_path):
-    """استخراج الصوت وتحويله إلى MP3"""
     try:
         audio_path = video_path.rsplit('.', 1)[0] + '.mp3'
         video = VideoFileClip(video_path)
@@ -28,7 +27,6 @@ def extract_audio_from_video(video_path):
         print(f"Audio extraction error: {e}")
         return None
 
-# زيادة مهلة الاتصال والرفع
 apihelper.CONNECT_TIMEOUT = 120
 apihelper.READ_TIMEOUT = 300
 
@@ -57,18 +55,18 @@ HEADERS = {
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     welcome_text = (
-        "أهلاً بك في بوت التحميل واستخراج النصوص الشامل! 🚀\n\n"
-        "✨ **ماذا يمكنني أن أفعل لك؟**\n"
-        "1️⃣ **تنزيل الوسائط:** أرسل لي رابطاً من (يوتيوب، إنستغرام، تيك توك، فيسبوك، إلخ).\n"
-        "2️⃣ **استخراج الصوت:** اضغط على زر 'استخراج الصوت' تحت أي فيديو يتم تنزيله.\n"
-        "3️⃣ **استخراج النص من الصور (OCR):** أرسل لي أي صورة تحتوي على نص وسأقوم بقراءته واستخراجه فوراً!"
+        "أهلاً بك في البوت الشامل! 🚀\n\n"
+        "✨ **الخدمات المتاحة:**\n"
+        "1️⃣ **تنزيل الوسائط:** أرسل رابط فيديو أو صورة.\n"
+        "2️⃣ **استخراج الصوت:** تحويل الفيديو لمقطع صوتي.\n"
+        "3️⃣ **استخراج النصوص (OCR):** قراءة النصوص من الصور."
     )
     bot.reply_to(message, welcome_text)
 
 def clean_url(url):
     return url.split('?')[0]
 
-# معالج الصور لاستخراج النص العربي المضمون عبر OCR.Space API (Engine 3 + ara)
+# معالج الصور (OCR) باستخدام OCREngine 2 المطور للغة العربية
 @bot.message_handler(content_types=['photo'])
 def handle_photo_ocr(message):
     msg = bot.reply_to(message, "جاري قراءة النص العربي من الصورة... 🔍")
@@ -79,10 +77,9 @@ def handle_photo_ocr(message):
         payload = {
             'apikey': 'helloworld',
             'language': 'ara',
-            'OCREngine': 3,
+            'OCREngine': 2,
             'isOverlayRequired': False,
-            'detectOrientation': 'true',
-            'scale': 'true'
+            'scale': True
         }
         
         response = requests.post(
@@ -97,7 +94,11 @@ def handle_photo_ocr(message):
         if result.get('OCRExitCode') == 1 and result.get('ParsedResults'):
             extracted_text = result['ParsedResults'][0]['ParsedText'].strip()
             if extracted_text:
-                bot.edit_message_text(f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}", message.chat.id, msg.message_id)
+                bot.edit_message_text(
+                    f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}",
+                    message.chat.id,
+                    msg.message_id
+                )
                 return
 
         bot.edit_message_text("عذراً، لم يتم العثور على نص واضح داخل الصورة. ❌", message.chat.id, msg.message_id)
@@ -105,101 +106,99 @@ def handle_photo_ocr(message):
     except Exception as e:
         bot.edit_message_text(f"حدث خطأ أثناء المعالجة: {str(e)}", message.chat.id, msg.message_id)
 
-# معالج الرابط والوسائط
+# معالج الروابط والوسائط
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    url = message.text.strip()
+    text_input = message.text.strip()
     
-    if not (url.startswith('http://') or url.startswith('https://')):
-        bot.reply_to(message, "الرجاء إرسال رابط صحيح يتبعه http:// أو https:// أو إرسال صورة لاستخراج النص منها.")
-        return
+    if text_input.startswith('http://') or text_input.startswith('https://'):
+        msg = bot.reply_to(message, "جاري المعالجة والتحميل... ⏳")
 
-    msg = bot.reply_to(message, "جاري المعالجة والتحميل... ⏳")
+        if not os.path.exists('downloads'):
+            os.makedirs('downloads')
+        
+        for f in glob.glob('downloads/*'):
+            try:
+                os.remove(f)
+            except Exception:
+                pass
 
-    if not os.path.exists('downloads'):
-        os.makedirs('downloads')
-    
-    for f in glob.glob('downloads/*'):
-        try:
-            os.remove(f)
-        except Exception:
-            pass
-
-    # إنستغرام
-    if 'instagram.com' in url:
-        try:
-            L = instaloader.Instaloader(
-                dirname_pattern='downloads',
-                filename_pattern='{shortcode}',
-                download_videos=True,
-                download_video_thumbnails=False,
-                download_geotags=False,
-                download_comments=False,
-                save_metadata=False
-            )
-            
-            clean_link = clean_url(url)
-            shortcode = None
-            
-            if '/reel/' in clean_link:
-                shortcode = clean_link.split('/reel/')[1].split('/')[0]
-            elif '/p/' in clean_link:
-                shortcode = clean_link.split('/p/')[1].split('/')[0]
+        if 'instagram.com' in text_input:
+            try:
+                L = instaloader.Instaloader(
+                    dirname_pattern='downloads',
+                    filename_pattern='{shortcode}',
+                    download_videos=True,
+                    download_video_thumbnails=False,
+                    download_geotags=False,
+                    download_comments=False,
+                    save_metadata=False
+                )
                 
-            if shortcode:
-                post = instaloader.Post.from_shortcode(L.context, shortcode)
-                L.download_post(post, target='downloads')
-        except Exception as e:
-            print(f"Instaloader error: {e}")
-
-    # باقي المنصات عبر yt-dlp
-    ydl_opts = {
-        'outtmpl': 'downloads/%(id)s.%(ext)s',
-        'quiet': True,
-        'no_warnings': True,
-        'format': 'best[height<=720]/best',
-        'user_agent': HEADERS['User-Agent'],
-    }
-    
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            ydl.download([url])
-        except Exception:
-            pass
-
-    downloaded_files = glob.glob('downloads/*')
-
-    if downloaded_files:
-        try:
-            for file_path in downloaded_files:
-                ext = file_path.split('.')[-1].lower()
+                clean_link = clean_url(text_input)
+                shortcode = None
                 
-                if ext in ['jpg', 'jpeg', 'png', 'webp']:
-                    with open(file_path, 'rb') as file_data:
-                        bot.send_photo(message.chat.id, file_data, timeout=120)
-                    os.remove(file_path)
+                if '/reel/' in clean_link:
+                    shortcode = clean_link.split('/reel/')[1].split('/')[0]
+                elif '/p/' in clean_link:
+                    shortcode = clean_link.split('/p/')[1].split('/')[0]
                     
-                elif ext in ['mp4', 'mkv', 'webm', 'mov']:
-                    temp_video_path = f"downloads/temp_{os.path.basename(file_path)}"
-                    os.rename(file_path, temp_video_path)
+                if shortcode:
+                    post = instaloader.Post.from_shortcode(L.context, shortcode)
+                    L.download_post(post, target='downloads')
+            except Exception as e:
+                print(f"Instaloader error: {e}")
+
+        ydl_opts = {
+            'outtmpl': 'downloads/%(id)s.%(ext)s',
+            'quiet': True,
+            'no_warnings': True,
+            'format': 'best[height<=720]/best',
+            'user_agent': HEADERS['User-Agent'],
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                ydl.download([text_input])
+            except Exception:
+                pass
+
+        downloaded_files = glob.glob('downloads/*')
+
+        if downloaded_files:
+            try:
+                for file_path in downloaded_files:
+                    ext = file_path.split('.')[-1].lower()
                     
-                    with open(temp_video_path, 'rb') as video_file:
-                        markup = InlineKeyboardMarkup()
-                        btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"extract_{os.path.basename(temp_video_path)}")
-                        markup.add(btn)
-                        bot.send_video(message.chat.id, video_file, caption="تم تنزيل الفيديو بنجاح! 🎬", reply_markup=markup)
+                    if ext in ['jpg', 'jpeg', 'png', 'webp']:
+                        with open(file_path, 'rb') as file_data:
+                            bot.send_photo(message.chat.id, file_data, timeout=120)
+                        os.remove(file_path)
                         
-                else:
-                    with open(file_path, 'rb') as file_data:
-                        bot.send_document(message.chat.id, file_data, timeout=300)
-                    os.remove(file_path)
+                    elif ext in ['mp4', 'mkv', 'webm', 'mov']:
+                        temp_video_path = f"downloads/temp_{os.path.basename(file_path)}"
+                        os.rename(file_path, temp_video_path)
+                        
+                        with open(temp_video_path, 'rb') as video_file:
+                            markup = InlineKeyboardMarkup()
+                            btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"extract_{os.path.basename(temp_video_path)}")
+                            markup.add(btn)
+                            bot.send_video(message.chat.id, video_file, caption="تم تنزيل الفيديو بنجاح! 🎬", reply_markup=markup)
+                            
+                    else:
+                        with open(file_path, 'rb') as file_data:
+                            bot.send_document(message.chat.id, file_data, timeout=300)
+                        os.remove(file_path)
 
-            bot.delete_message(message.chat.id, msg.message_id)
+                bot.delete_message(message.chat.id, msg.message_id)
 
-        except Exception as e:
-            bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: {str(e)}", message.chat.id, msg.message_id)
+            except Exception as e:
+                bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: {str(e)}", message.chat.id, msg.message_id)
+        else:
+            bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط.", message.chat.id, msg.message_id)
+            
     else:
-        bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط.", message.chat.id, msg.message_id)
+        bot.reply_to(message, "يرجى إرسال رابط فيديو/صورة للتنزيل، أو صورة تحتوي على نص لقراءتها. 📌")
 
 # معالج استخراج الصوت
 @bot.callback_query_handler(func=lambda call: call.data.startswith('extract_'))
@@ -225,4 +224,12 @@ def handle_audio_extraction(call):
     else:
         bot.answer_callback_query(call.id, "انتهت صلاحية هذا الملف أو تم حذفه! ❌", show_alert=True)
 
-bot.polling(non_stop=True)
+# إلغاء الـ Webhook النشط ومسح التحديثات العالقة قبل البدء
+try:
+    bot.remove_webhook(drop_pending_updates=True)
+    print("Webhook deleted successfully!")
+except Exception as e:
+    print(f"Error removing webhook: {e}")
+
+# تشغيل البوت عبر infinity_polling لمنع تعارضات الجلسات
+bot.infinity_polling(skip_pending_updates=True)
