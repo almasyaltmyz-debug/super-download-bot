@@ -48,7 +48,7 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
 }
 
 @bot.message_handler(commands=['start', 'help'])
@@ -62,10 +62,16 @@ def send_welcome(message):
     )
     bot.reply_to(message, welcome_text)
 
-# تنظيف وتجهيز الروابط (تيك توك وانستغرام)
-def clean_url(url):
-    clean = url.split('?')[0]
-    return clean
+# حل روابط TikTok المختصرة واستخراج الرابط الحقيقي
+def resolve_tiktok_url(url):
+    try:
+        if 'vt.tiktok.com' in url or 'vm.tiktok.com' in url:
+            res = requests.get(url, headers=HEADERS, allow_redirects=True, timeout=15)
+            return res.url.split('?')[0]
+        return url.split('?')[0]
+    except Exception as e:
+        print(f"URL resolve error: {e}")
+        return url.split('?')[0]
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo_ocr(message):
@@ -110,7 +116,10 @@ def handle_photo_ocr(message):
 def handle_message(message):
     text_input = message.text.strip()
     
-    if text_input.startswith('http://') or text_input.startswith('https://'):
+    # استخراج أول رابط داخل الرسالة لو كانت تحتوي على نصوص إضافية
+    urls = re.findall(r'https?://[^\s]+', text_input)
+    if urls:
+        raw_url = urls[0]
         msg = bot.reply_to(message, "جاري المعالجة والتحميل... ⏳")
 
         if not os.path.exists('downloads'):
@@ -122,10 +131,10 @@ def handle_message(message):
             except Exception:
                 pass
 
-        # تنظيف الرابط الأساسي
-        target_url = clean_url(text_input)
+        # فك الرابط المختصر وتنظيفه
+        target_url = resolve_tiktok_url(raw_url)
 
-        if 'instagram.com' in text_input:
+        if 'instagram.com' in target_url:
             try:
                 L = instaloader.Instaloader(
                     dirname_pattern='downloads',
@@ -149,24 +158,30 @@ def handle_message(message):
             except Exception as e:
                 print(f"Instaloader error: {e}")
 
-        # خيارات yt-dlp المحسنة لدعم TikTok والتتبع
+        # إعدادات yt-dlp المحدثة بتجاوز القيود
         ydl_opts = {
             'outtmpl': 'downloads/%(id)s.%(ext)s',
             'quiet': True,
             'no_warnings': True,
-            'format': 'best[height<=720]/best',
-            'user_agent': HEADERS['User-Agent'],
+            'format': 'bestvideo+bestaudio/best',
+            'check_formats': False,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+            }
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
-                # تجربة التحميل بالرابط المنظف أولاً، ثم الرابط الأصلي
-                try:
-                    ydl.download([target_url])
-                except Exception:
-                    ydl.download([text_input])
+                ydl.download([target_url])
             except Exception as e:
-                print(f"yt-dlp error: {e}")
+                print(f"yt-dlp primary error: {e}")
+                try:
+                    # محاولة ثانية بالرابط الأصلي خام
+                    ydl.download([raw_url])
+                except Exception as e2:
+                    print(f"yt-dlp fallback error: {e2}")
 
         downloaded_files = glob.glob('downloads/*')
 
