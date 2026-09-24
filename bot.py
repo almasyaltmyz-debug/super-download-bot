@@ -15,7 +15,6 @@ try:
 except ImportError:
     from moviepy import VideoFileClip
 
-# دالة استخراج الصوت من الفيديو
 def extract_audio_from_video(video_path):
     try:
         audio_path = video_path.rsplit('.', 1)[0] + '.mp3'
@@ -46,8 +45,6 @@ def keep_alive():
 keep_alive()
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-
-# تعيين threaded=False لتجنب تجميد الخيوط على Render
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 HEADERS = {
@@ -65,10 +62,11 @@ def send_welcome(message):
     )
     bot.reply_to(message, welcome_text)
 
+# تنظيف وتجهيز الروابط (تيك توك وانستغرام)
 def clean_url(url):
-    return url.split('?')[0]
+    clean = url.split('?')[0]
+    return clean
 
-# معالج الصور (OCR)
 @bot.message_handler(content_types=['photo'])
 def handle_photo_ocr(message):
     msg = bot.reply_to(message, "جاري قراءة النص العربي من الصورة... 🔍")
@@ -108,7 +106,6 @@ def handle_photo_ocr(message):
     except Exception as e:
         bot.edit_message_text(f"حدث خطأ أثناء المعالجة: {str(e)}", message.chat.id, msg.message_id)
 
-# معالج الروابط والوسائط
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     text_input = message.text.strip()
@@ -125,6 +122,9 @@ def handle_message(message):
             except Exception:
                 pass
 
+        # تنظيف الرابط الأساسي
+        target_url = clean_url(text_input)
+
         if 'instagram.com' in text_input:
             try:
                 L = instaloader.Instaloader(
@@ -137,13 +137,11 @@ def handle_message(message):
                     save_metadata=False
                 )
                 
-                clean_link = clean_url(text_input)
                 shortcode = None
-                
-                if '/reel/' in clean_link:
-                    shortcode = clean_link.split('/reel/')[1].split('/')[0]
-                elif '/p/' in clean_link:
-                    shortcode = clean_link.split('/p/')[1].split('/')[0]
+                if '/reel/' in target_url:
+                    shortcode = target_url.split('/reel/')[1].split('/')[0]
+                elif '/p/' in target_url:
+                    shortcode = target_url.split('/p/')[1].split('/')[0]
                     
                 if shortcode:
                     post = instaloader.Post.from_shortcode(L.context, shortcode)
@@ -151,6 +149,7 @@ def handle_message(message):
             except Exception as e:
                 print(f"Instaloader error: {e}")
 
+        # خيارات yt-dlp المحسنة لدعم TikTok والتتبع
         ydl_opts = {
             'outtmpl': 'downloads/%(id)s.%(ext)s',
             'quiet': True,
@@ -161,9 +160,13 @@ def handle_message(message):
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
-                ydl.download([text_input])
-            except Exception:
-                pass
+                # تجربة التحميل بالرابط المنظف أولاً، ثم الرابط الأصلي
+                try:
+                    ydl.download([target_url])
+                except Exception:
+                    ydl.download([text_input])
+            except Exception as e:
+                print(f"yt-dlp error: {e}")
 
         downloaded_files = glob.glob('downloads/*')
 
@@ -202,7 +205,6 @@ def handle_message(message):
     else:
         bot.reply_to(message, "يرجى إرسال رابط فيديو/صورة للتنزيل، أو صورة تحتوي على نص لقراءتها. 📌")
 
-# معالج استخراج الصوت
 @bot.callback_query_handler(func=lambda call: call.data.startswith('extract_'))
 def handle_audio_extraction(call):
     filename = call.data.replace('extract_', '')
@@ -226,12 +228,10 @@ def handle_audio_extraction(call):
     else:
         bot.answer_callback_query(call.id, "انتهت صلاحية هذا الملف أو تم حذفه! ❌", show_alert=True)
 
-# إلغاء الـ Webhook صراحةً عبر طلب مباشر بسيرفرات تليجرام
 try:
     requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10)
     print("Webhook cleared successfully via HTTP request")
 except Exception as e:
     print(f"Failed to clear webhook: {e}")
 
-# البدء المباشر للـ Polling
 bot.polling(none_stop=True, interval=0)
