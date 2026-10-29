@@ -15,6 +15,9 @@ try:
 except ImportError:
     from moviepy import VideoFileClip
 
+# حد الـ 50 ميجابايت لفيديوهات تليجرام العادية
+TELEGRAM_VIDEO_LIMIT = 50 * 1024 * 1024
+
 def extract_audio_from_video(video_path):
     try:
         audio_path = video_path.rsplit('.', 1)[0] + '.mp3'
@@ -56,13 +59,12 @@ def send_welcome(message):
     welcome_text = (
         "أهلاً بك في البوت الشامل! 🚀\n\n"
         "✨ **الخدمات المتاحة:**\n"
-        "1️⃣ **تنزيل الوسائط:** أرسل رابط فيديو أو صورة.\n"
+        "1️⃣ **تنزيل الوسائط:** أرسل رابط فيديو أو صورة بأعلى جودة أصلية.\n"
         "2️⃣ **استخراج الصوت:** تحويل الفيديو لمقطع صوتي.\n"
         "3️⃣ **استخراج النصوص (OCR):** قراءة النصوص من الصور."
     )
     bot.reply_to(message, welcome_text)
 
-# حل روابط TikTok المختصرة واستخراج الرابط الحقيقي
 def resolve_tiktok_url(url):
     try:
         if 'vt.tiktok.com' in url or 'vm.tiktok.com' in url:
@@ -115,12 +117,11 @@ def handle_photo_ocr(message):
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     text_input = message.text.strip()
-    
-    # استخراج أول رابط داخل الرسالة لو كانت تحتوي على نصوص إضافية
     urls = re.findall(r'https?://[^\s]+', text_input)
+    
     if urls:
         raw_url = urls[0]
-        msg = bot.reply_to(message, "جاري المعالجة والتحميل... ⏳")
+        msg = bot.reply_to(message, "جاري جلب الفيديو بأعلى جودة أصلية... ⏳")
 
         if not os.path.exists('downloads'):
             os.makedirs('downloads')
@@ -131,7 +132,6 @@ def handle_message(message):
             except Exception:
                 pass
 
-        # فك الرابط المختصر وتنظيفه
         target_url = resolve_tiktok_url(raw_url)
 
         if 'instagram.com' in target_url:
@@ -158,7 +158,7 @@ def handle_message(message):
             except Exception as e:
                 print(f"Instaloader error: {e}")
 
-        # إعدادات yt-dlp المحدثة بتجاوز القيود
+        # تنزيل الجودة الأصلية الخام بدون أي تقليل أو ضغط
         ydl_opts = {
             'outtmpl': 'downloads/%(id)s.%(ext)s',
             'quiet': True,
@@ -178,7 +178,6 @@ def handle_message(message):
             except Exception as e:
                 print(f"yt-dlp primary error: {e}")
                 try:
-                    # محاولة ثانية بالرابط الأصلي خام
                     ydl.download([raw_url])
                 except Exception as e2:
                     print(f"yt-dlp fallback error: {e2}")
@@ -188,6 +187,7 @@ def handle_message(message):
         if downloaded_files:
             try:
                 for file_path in downloaded_files:
+                    file_size = os.path.getsize(file_path)
                     ext = file_path.split('.')[-1].lower()
                     
                     if ext in ['jpg', 'jpeg', 'png', 'webp']:
@@ -199,11 +199,30 @@ def handle_message(message):
                         temp_video_path = f"downloads/temp_{os.path.basename(file_path)}"
                         os.rename(file_path, temp_video_path)
                         
-                        with open(temp_video_path, 'rb') as video_file:
-                            markup = InlineKeyboardMarkup()
-                            btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"extract_{os.path.basename(temp_video_path)}")
-                            markup.add(btn)
-                            bot.send_video(message.chat.id, video_file, caption="تم تنزيل الفيديو بنجاح! 🎬", reply_markup=markup)
+                        markup = InlineKeyboardMarkup()
+                        btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"extract_{os.path.basename(temp_video_path)}")
+                        markup.add(btn)
+
+                        # إرسال الفيديو حسب حجمه لضمان عدم حدوث خطأ 413
+                        if file_size <= TELEGRAM_VIDEO_LIMIT:
+                            with open(temp_video_path, 'rb') as video_file:
+                                bot.send_video(
+                                    message.chat.id, 
+                                    video_file, 
+                                    caption="تم التحميل بالجودة الأصلية! 🎬", 
+                                    reply_markup=markup,
+                                    timeout=300
+                                )
+                        else:
+                            # إذا كان الحجم كبيراً جداً، يُرسل كمستند خام للحفاظ على جودته 100%
+                            with open(temp_video_path, 'rb') as video_file:
+                                bot.send_document(
+                                    message.chat.id, 
+                                    video_file, 
+                                    caption="تم إرسال الفيديو كملف للحفاظ على الجودة الأصلية الفائقة (أكثر من 50MB) 📁✨", 
+                                    reply_markup=markup,
+                                    timeout=300
+                                )
                             
                     else:
                         with open(file_path, 'rb') as file_data:
