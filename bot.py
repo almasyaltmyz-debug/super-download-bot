@@ -15,6 +15,9 @@ try:
 except ImportError:
     from moviepy import VideoFileClip
 
+# الحد الأقصى لتليجرام
+MAX_TELEGRAM_SIZE = 49 * 1024 * 1024
+
 def extract_audio_from_video(video_path):
     try:
         audio_path = video_path.rsplit('.', 1)[0] + '.mp3'
@@ -25,6 +28,36 @@ def extract_audio_from_video(video_path):
     except Exception as e:
         print(f"Audio extraction error: {e}")
         return None
+
+# دالة لتقليص حجم الفيديو عند الضرورة لتجاوز حاجز 50 ميجابايت
+def compress_video_if_needed(video_path):
+    try:
+        size = os.path.getsize(video_path)
+        if size <= MAX_TELEGRAM_SIZE:
+            return video_path
+        
+        compressed_path = video_path.rsplit('.', 1)[0] + '_comp.mp4'
+        clip = VideoFileClip(video_path)
+        
+        # تغيير الأبعاد لتخفيف الحجم مع الحفاظ على النسبة
+        new_clip = clip.resize(height=480) if clip.h > 480 else clip
+        new_clip.write_videofile(
+            compressed_path, 
+            bitrate="800k", 
+            audio_bitrate="96k", 
+            preset="ultrafast", 
+            logger=None
+        )
+        clip.close()
+        new_clip.close()
+        
+        if os.path.exists(compressed_path) and os.path.getsize(compressed_path) <= MAX_TELEGRAM_SIZE:
+            os.remove(video_path)
+            return compressed_path
+        return video_path
+    except Exception as e:
+        print(f"Compression error: {e}")
+        return video_path
 
 apihelper.CONNECT_TIMEOUT = 120
 apihelper.READ_TIMEOUT = 300
@@ -118,7 +151,7 @@ def handle_message(message):
     
     if urls:
         raw_url = urls[0]
-        msg = bot.reply_to(message, "جاري المعالجة وتنزيل أفضل جودة متاحة... ⏳")
+        msg = bot.reply_to(message, "جاري المعالجة وتنزيل الفيديو... ⏳")
 
         if not os.path.exists('downloads'):
             os.makedirs('downloads')
@@ -155,12 +188,11 @@ def handle_message(message):
             except Exception as e:
                 print(f"Instaloader error: {e}")
 
-        # يختار تلقائياً أعلى جودة لا تتخطى حاجز الـ 48 ميجابايت لتفادي خطأ تليجرام 413
         ydl_opts = {
             'outtmpl': 'downloads/%(id)s.%(ext)s',
             'quiet': True,
             'no_warnings': True,
-            'format': 'bestvideo[filesize<48M]+bestaudio[filesize<48M]/best[filesize<48M]/best',
+            'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
             'check_formats': False,
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -184,14 +216,6 @@ def handle_message(message):
         if downloaded_files:
             try:
                 for file_path in downloaded_files:
-                    file_size = os.path.getsize(file_path)
-                    
-                    # التحقق الصارم قبل الرفع
-                    if file_size >= 49.5 * 1024 * 1024:
-                        bot.edit_message_text("⚠️ عذراً، حجم هذا المقطع يزيد عن 50 ميجابايت (الحد الأقصى المسموح للبوتات في تليجرام).", message.chat.id, msg.message_id)
-                        os.remove(file_path)
-                        return
-
                     ext = file_path.split('.')[-1].lower()
                     
                     if ext in ['jpg', 'jpeg', 'png', 'webp']:
@@ -203,19 +227,29 @@ def handle_message(message):
                         temp_video_path = f"downloads/temp_{os.path.basename(file_path)}"
                         os.rename(file_path, temp_video_path)
                         
+                        # معالجة تلقائية للحجم إن تجاوز 50MB
+                        final_path = compress_video_if_needed(temp_video_path)
+                        final_size = os.path.getsize(final_path)
+
+                        if final_size > MAX_TELEGRAM_SIZE:
+                            bot.edit_message_text("⚠️ الفيديو طويل جداً ويتجاوز الحد الأقصى حتى بعد تقليص الحجم.", message.chat.id, msg.message_id)
+                            os.remove(final_path)
+                            return
+
                         markup = InlineKeyboardMarkup()
-                        btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"extract_{os.path.basename(temp_video_path)}")
+                        btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"extract_{os.path.basename(final_path)}")
                         markup.add(btn)
 
-                        with open(temp_video_path, 'rb') as video_file:
+                        with open(final_path, 'rb') as video_file:
                             bot.send_video(
                                 message.chat.id, 
                                 video_file, 
-                                caption="تم تنزيل الفيديو بأعلى جودة ممكنة! 🎬✨", 
+                                caption="تم تنزيل الفيديو بنجاح! 🎬✨", 
                                 reply_markup=markup,
                                 timeout=300
                             )
-                        os.remove(temp_video_path)
+                        if os.path.exists(final_path):
+                            os.remove(final_path)
                             
                     else:
                         with open(file_path, 'rb') as file_data:
