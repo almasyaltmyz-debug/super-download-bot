@@ -15,7 +15,6 @@ try:
 except ImportError:
     from moviepy import VideoFileClip
 
-# الحد الأقصى لتليجرام
 MAX_TELEGRAM_SIZE = 49 * 1024 * 1024
 
 def extract_audio_from_video(video_path):
@@ -51,7 +50,7 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
 @bot.message_handler(commands=['start', 'help'])
@@ -60,38 +59,73 @@ def send_welcome(message):
         "أهلاً بك في البوت الشامل! 🚀\n\n"
         "✨ **الخدمات المتاحة:**\n"
         "1️⃣ **تنزيل الوسائط:** فيديوهات تيك توك، إنستغرام، يوتيوب.\n"
-        "2️⃣ **ألبومات تيك توك:** تنزيل سلايد الصور كاملة مع الصوت.\n"
+        "2️⃣ **صور تيك توك:** تنزيل سلايد الصور كاملة بجودتها الأصلية مع الصوت.\n"
         "3️⃣ **استخراج الصوت:** تحويل الفيديو لمقطع صوتي.\n"
         "4️⃣ **استخراج النصوص (OCR):** قراءة النصوص من الصور."
     )
     bot.reply_to(message, welcome_text)
 
-# تنزيل ومعالجة تيك توك (فيديو أو ألبوم صور + صوت)
+# تنزيل صور وفيديوهات تيك توك
 def process_tiktok(chat_id, url, status_msg_id):
     try:
         api_url = f"https://www.tikwm.com/api/?url={url}"
-        res = requests.get(api_url, timeout=20).json()
+        res = requests.get(api_url, headers=HEADERS, timeout=25).json()
         
         if res.get('code') != 0:
             return False
 
         data = res.get('data', {})
 
-        # في حال كان الرابط ألبوم صور (Photo Mode / Slideshow)
+        # في حال كان الرابط يحتوي على صور (Photo Mode / Slideshow)
         if 'images' in data and data['images']:
             images = data['images']
             music_url = data.get('music')
-            title = data.get('title', 'ألبوم صور تيك توك')
+            title = data.get('title', 'صور تيك توك')
 
-            # تليجرام يقبل بحد أقصى 10 صور لكل ألبوم، نقسمها في مجموعات
-            for i in range(0, len(images), 10):
-                batch = images[i:i + 10]
-                media_group = [InputMediaPhoto(img_url) for img_url in batch]
+            # تحميل الصور محلياً لتجنب حظر الروابط المباشرة في تليجرام
+            saved_images = []
+            for idx, img_link in enumerate(images):
+                img_data = requests.get(img_link, headers=HEADERS, timeout=20).content
+                img_filename = f"downloads/tiktok_img_{idx}.jpg"
+                with open(img_filename, 'wb') as f:
+                    f.write(img_data)
+                saved_images.append(img_filename)
+
+            # إرسال الصور في مجموعات (كل مجموعة حدها الأقصى 10 صور في تليجرام)
+            for i in range(0, len(saved_images), 10):
+                batch = saved_images[i:i + 10]
+                media_group = []
+                file_objects = []
+                for p in batch:
+                    fo = open(p, 'rb')
+                    file_objects.append(fo)
+                    media_group.append(InputMediaPhoto(fo))
+                
                 bot.send_media_group(chat_id, media_group)
+                for fo in file_objects:
+                    fo.close()
 
-            # إرسال المقطع الصوتي المصاحب للألبوم
+            # حذف الصور المحفوظة محلياً بعد الإرسال
+            for p in saved_images:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+
+            # تحميل وإرسال المقطع الصوتي المصاحب
             if music_url:
-                bot.send_audio(chat_id, music_url, caption=f"🎵 الصوت المصاحب: {title}")
+                music_data = requests.get(music_url, headers=HEADERS, timeout=25).content
+                audio_file_path = "downloads/tiktok_audio.mp3"
+                with open(audio_file_path, 'wb') as f:
+                    f.write(music_data)
+                
+                with open(audio_file_path, 'rb') as audio_file:
+                    bot.send_audio(chat_id, audio_file, title=title[:30], caption=f"🎵 الصوت المصاحب: {title}")
+                
+                try:
+                    os.remove(audio_file_path)
+                except Exception:
+                    pass
 
             bot.delete_message(chat_id, status_msg_id)
             return True
@@ -99,12 +133,24 @@ def process_tiktok(chat_id, url, status_msg_id):
         # في حال كان المنشور فيديو عادي
         video_url = data.get('play')
         if video_url:
-            bot.send_video(chat_id, video_url, caption="تم تنزيل الفيديو بدون علامة مائية! 🎬✨")
+            video_data = requests.get(video_url, headers=HEADERS, timeout=40).content
+            video_path = "downloads/tiktok_video.mp4"
+            with open(video_path, 'wb') as f:
+                f.write(video_data)
+
+            with open(video_path, 'rb') as vf:
+                bot.send_video(chat_id, vf, caption="تم تنزيل الفيديو بدون علامة مائية! 🎬✨")
+            
+            try:
+                os.remove(video_path)
+            except Exception:
+                pass
+                
             bot.delete_message(chat_id, status_msg_id)
             return True
 
     except Exception as e:
-        print(f"TikTok API error: {e}")
+        print(f"TikTok process error: {e}")
     return False
 
 @bot.message_handler(content_types=['photo'])
@@ -155,13 +201,6 @@ def handle_message(message):
         raw_url = urls[0]
         msg = bot.reply_to(message, "جاري المعالجة وتنزيل المحتوى... ⏳")
 
-        # معالجة روابط تيك توك عبر الـ API المتخصص
-        if 'tiktok.com' in raw_url:
-            success = process_tiktok(message.chat.id, raw_url, msg.message_id)
-            if success:
-                return
-
-        # في حال كان الرابط لموقع آخر (إنستغرام، يوتيوب، إلخ)
         if not os.path.exists('downloads'):
             os.makedirs('downloads')
         
@@ -170,6 +209,12 @@ def handle_message(message):
                 os.remove(f)
             except Exception:
                 pass
+
+        # فحص وتنزيل تيك توك أولاً سواء صور أو فيديو
+        if 'tiktok.com' in raw_url:
+            success = process_tiktok(message.chat.id, raw_url, msg.message_id)
+            if success:
+                return
 
         clean_link = raw_url.split('?')[0]
 
@@ -300,4 +345,4 @@ try:
 except Exception as e:
     print(f"Failed to clear webhook: {e}")
 
-bot.polling(none_stop=True, interval=0)
+bot.infinity_polling(timeout=10, long_polling_timeout=5)
