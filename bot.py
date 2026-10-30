@@ -50,7 +50,8 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*'
 }
 
 @bot.message_handler(commands=['start', 'help'])
@@ -59,90 +60,104 @@ def send_welcome(message):
         "أهلاً بك في البوت الشامل! 🚀\n\n"
         "✨ **الخدمات المتاحة:**\n"
         "1️⃣ **تنزيل الوسائط:** فيديوهات تيك توك، إنستغرام، يوتيوب.\n"
-        "2️⃣ **صور وسلايدات تيك توك:** تنزيل الصور كاملة بدقتها الأصلية مع الصوت.\n"
+        "2️⃣ **ألبومات تيك توك:** تنزيل الصور كاملة بدقتها الأصلية مع الصوت.\n"
         "3️⃣ **استخراج الصوت:** تحويل الفيديو لمقطع صوتي.\n"
         "4️⃣ **استخراج النصوص (OCR):** قراءة النصوص من الصور."
     )
     bot.reply_to(message, welcome_text)
 
-# فك الروابط المختصرة
-def resolve_clean_url(url):
-    try:
-        res = requests.get(url, headers=HEADERS, allow_redirects=True, timeout=12)
-        return res.url.split('?')[0]
-    except Exception:
-        return url.split('?')[0]
-
-# دالة تنزيل تيك توك باستخدام مسارين (API رئيسي + احتياطي)
+# تنزيل ومعالجة تيك توك عبر استدعاء موثوق
 def download_tiktok_content(chat_id, raw_url, status_msg_id):
-    clean_url = resolve_clean_url(raw_url)
-    
-    # 1. المحاولة الأولى: عبر TikWM API
     try:
-        api_url = f"https://www.tikwm.com/api/?url={clean_url}"
-        res = requests.get(api_url, headers=HEADERS, timeout=20).json()
-        
+        # استخدام طلب POST لواجهة TikWM لضمان فك الروابط المختصرة والصور
+        api_url = "https://www.tikwm.com/api/"
+        payload = {'url': raw_url, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}
+        res = requests.post(api_url, data=payload, headers=HEADERS, timeout=25).json()
+
+        if res.get('code') != 0:
+            # محاولة احتياطية GET
+            res = requests.get(f"https://www.tikwm.com/api/?url={raw_url}", headers=HEADERS, timeout=25).json()
+
         if res.get('code') == 0:
             data = res.get('data', {})
-            
-            # صور وسلايد شو
+
+            # 1. حالة ألبوم الصور (Slideshow)
             if 'images' in data and data['images']:
                 images = data['images']
                 music_url = data.get('music')
-                title = data.get('title', 'صور تيك توك')
+                title = data.get('title', 'ألبوم صور تيك توك')
 
-                for i in range(0, len(images), 10):
-                    batch = images[i:i + 10]
-                    media_group = [InputMediaPhoto(img_url) for img_url in batch]
+                saved_files = []
+                for idx, img_url in enumerate(images):
+                    try:
+                        r = requests.get(img_url, headers=HEADERS, timeout=15)
+                        if r.status_code == 200:
+                            img_path = f"downloads/tk_img_{chat_id}_{idx}.jpg"
+                            with open(img_path, 'wb') as f:
+                                f.write(r.content)
+                            saved_files.append(img_path)
+                    except Exception as err:
+                        print(f"Error fetching image: {err}")
+
+                # إرسال الصور كملفات حقيقية (حتى 10 في كل دفعة)
+                for i in range(0, len(saved_files), 10):
+                    batch = saved_files[i:i + 10]
+                    media_group = []
+                    open_handles = []
+                    for path in batch:
+                        fh = open(path, 'rb')
+                        open_handles.append(fh)
+                        media_group.append(InputMediaPhoto(fh))
+
                     bot.send_media_group(chat_id, media_group)
+                    for fh in open_handles:
+                        fh.close()
 
+                # تنظيف الصور
+                for path in saved_files:
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+
+                # إرسال الصوت المرفق
                 if music_url:
-                    bot.send_audio(chat_id, music_url, caption=f"🎵 الصوت المصاحب: {title[:50]}")
+                    try:
+                        audio_res = requests.get(music_url, headers=HEADERS, timeout=25)
+                        if audio_res.status_code == 200:
+                            audio_path = f"downloads/tk_audio_{chat_id}.mp3"
+                            with open(audio_path, 'wb') as f:
+                                f.write(audio_res.content)
+                            with open(audio_path, 'rb') as af:
+                                bot.send_audio(chat_id, af, title=title[:40], caption=f"🎵 {title[:60]}")
+                            if os.path.exists(audio_path):
+                                os.remove(audio_path)
+                    except Exception as err:
+                        print(f"Error sending audio: {err}")
 
                 bot.delete_message(chat_id, status_msg_id)
                 return True
 
-            # فيديو عادي
+            # 2. حالة الفيديو العادي
             video_url = data.get('play')
             if video_url:
-                bot.send_video(chat_id, video_url, caption="تم تنزيل الفيديو بنجاح! 🎬✨")
+                v_res = requests.get(video_url, headers=HEADERS, timeout=40)
+                video_path = f"downloads/tk_vid_{chat_id}.mp4"
+                with open(video_path, 'wb') as f:
+                    f.write(v_res.content)
+
+                markup = InlineKeyboardMarkup()
+                btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"extract_{os.path.basename(video_path)}")
+                markup.add(btn)
+
+                with open(video_path, 'rb') as vf:
+                    bot.send_video(chat_id, vf, caption="تم تنزيل الفيديو بنجاح! 🎬✨", reply_markup=markup)
+
                 bot.delete_message(chat_id, status_msg_id)
                 return True
-    except Exception as e:
-        print(f"TikWM failed: {e}")
-
-    # 2. المحاولة الثانية (واجهة بديلة في حال حظر Render أو تعثر TikWM)
-    try:
-        fallback_api = f"https://api.tiklydown.eu.org/api/download?url={clean_url}"
-        f_res = requests.get(fallback_api, headers=HEADERS, timeout=20).json()
-        
-        # استخراج الصور من الواجهة البديلة
-        if 'images' in f_res and f_res['images']:
-            images = [img['url'] if isinstance(img, dict) else img for img in f_res['images']]
-            music_url = f_res.get('music', {}).get('play_url') or f_res.get('music')
-            title = f_res.get('title', 'صور تيك توك')
-
-            for i in range(0, len(images), 10):
-                batch = images[i:i + 10]
-                media_group = [InputMediaPhoto(img_url) for img_url in batch]
-                bot.send_media_group(chat_id, media_group)
-
-            if music_url:
-                bot.send_audio(chat_id, music_url, caption=f"🎵 الصوت المصاحب: {title[:50]}")
-
-            bot.delete_message(chat_id, status_msg_id)
-            return True
-
-        # استخراج الفيديو من الواجهة البديلة
-        video_data = f_res.get('video', {})
-        fallback_vid = video_data.get('noWatermark') or video_data.get('watermark')
-        if fallback_vid:
-            bot.send_video(chat_id, fallback_vid, caption="تم تنزيل الفيديو بنجاح! 🎬✨")
-            bot.delete_message(chat_id, status_msg_id)
-            return True
 
     except Exception as e:
-        print(f"Fallback API failed: {e}")
+        print(f"download_tiktok_content error: {e}")
 
     return False
 
@@ -194,15 +209,6 @@ def handle_message(message):
         raw_url = urls[0]
         msg = bot.reply_to(message, "جاري المعالجة وتنزيل المحتوى... ⏳")
 
-        # معالجة تيك توك حصرياً عبر الواجهات المخصصة
-        if 'tiktok.com' in raw_url:
-            success = download_tiktok_content(message.chat.id, raw_url, msg.message_id)
-            if success:
-                return
-            else:
-                bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. ❌", message.chat.id, msg.message_id)
-                return
-
         if not os.path.exists('downloads'):
             os.makedirs('downloads')
         
@@ -211,6 +217,15 @@ def handle_message(message):
                 os.remove(f)
             except Exception:
                 pass
+
+        # إذا كان الرابط تيك توك يعالج فوراً
+        if 'tiktok.com' in raw_url:
+            success = download_tiktok_content(message.chat.id, raw_url, msg.message_id)
+            if success:
+                return
+            else:
+                bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. ❌", message.chat.id, msg.message_id)
+                return
 
         clean_link = raw_url.split('?')[0]
 
