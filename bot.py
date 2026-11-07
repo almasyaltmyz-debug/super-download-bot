@@ -32,7 +32,11 @@ keep_alive()
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
-
+# إيقاف وحذف أي اتصال سابق فور تشغيل الملف لمنع خطأ 409
+try:
+    bot.remove_webhook()
+except Exception as e:
+    print(f"Webhook cleanup note: {e}")
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     'Accept': 'application/json, text/plain, */*'
@@ -309,4 +313,4 @@ except Exception as e:
 
 if __name__ == "__main__":
     print("🤖 البوت يعمل بنجاح...")
-    bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    bot.infinity_polling(timeout=20, long_polling_timeout=10, skip_pending_updates=True)
