@@ -59,6 +59,7 @@ def send_downloaded_album(chat_id, image_paths, audio_paths=None):
     if not image_paths:
         return False
 
+    # إرسال الصور في مجموعات (10 صور كحد أقصى لكل ألبوم)
     for i in range(0, len(image_paths), 10):
         batch = image_paths[i:i + 10]
         media_group = []
@@ -78,6 +79,7 @@ def send_downloaded_album(chat_id, image_paths, audio_paths=None):
             for fh in open_handles:
                 fh.close()
 
+    # إرسال الصوت المرفق إن وجد
     if audio_paths:
         for a_path in audio_paths:
             try:
@@ -88,12 +90,14 @@ def send_downloaded_album(chat_id, image_paths, audio_paths=None):
 
     return True
 
+# ==================== محرك سحب الصور والألبومات (gallery-dl + API) ====================
 def download_images_and_slides(chat_id, raw_url, status_msg_id):
     clean_url = unshorten_url(raw_url)
     job_dir = f"downloads/job_{chat_id}_{uuid.uuid4().hex[:6]}"
     os.makedirs(job_dir, exist_ok=True)
 
     try:
+        # 1. المحاولة عبر محرك gallery-dl المخصص للصور (يدعم تيك توك photo وإنستغرام)
         cmd = [
             "gallery-dl",
             "--directory", job_dir,
@@ -125,6 +129,7 @@ def download_images_and_slides(chat_id, raw_url, status_msg_id):
             bot.delete_message(chat_id, status_msg_id)
             return True
 
+        # 2. محاولة احتياطية لتيك توك عبر TikWM مع تمرير الرابط المختصر والأصلي
         if 'tiktok.com' in raw_url:
             for target_u in [raw_url, clean_url.replace('/photo/', '/video/')]:
                 res = requests.post(
@@ -170,6 +175,7 @@ def download_images_and_slides(chat_id, raw_url, status_msg_id):
 
     return False
 
+# ==================== معالج قراءة النصوص (OCR) ====================
 @bot.message_handler(content_types=['photo'])
 def handle_photo_ocr(message):
     msg = bot.reply_to(message, "جاري قراءة النص العربي من الصورة... 🔍")
@@ -210,6 +216,7 @@ def handle_photo_ocr(message):
     except Exception as e:
         bot.edit_message_text(f"حدث خطأ أثناء المعالجة: {str(e)}", message.chat.id, msg.message_id)
 
+# ==================== المعالج العام للروابط ====================
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     if not message.text:
@@ -223,10 +230,12 @@ def handle_message(message):
 
         clean_check = unshorten_url(raw_url)
 
+        # إذا كان الرابط ألبوم صور تيك توك أو منشور صور إنستغرام، نوجهه لمحرك الصور أولاً
         if '/photo/' in clean_check or ('instagram.com/p/' in clean_check):
             if download_images_and_slides(message.chat.id, raw_url, msg.message_id):
                 return
 
+        # محاولة تنزيل الفيديو عبر yt-dlp
         req_id = uuid.uuid4().hex[:6]
         output_template = f'downloads/{message.chat.id}_{req_id}_%(id)s.%(ext)s'
 
@@ -291,6 +300,7 @@ def handle_message(message):
                     except Exception:
                         pass
 
+        # إذا فشل yt-dlp (لأن الرابط طلع ألبوم صور مختصر مثلاً)، نجرب محرك الصور تلقائياً
         if download_images_and_slides(message.chat.id, raw_url, msg.message_id):
             return
 
@@ -298,6 +308,7 @@ def handle_message(message):
     else:
         bot.reply_to(message, "يرجى إرسال رابط فيديو/صورة للتنزيل، أو صورة تحتوي على نص لقراءتها. 📌")
 
+# ==================== معالج زر استخراج الصوت ====================
 @bot.callback_query_handler(func=lambda call: call.data.startswith('ext_'))
 def handle_audio_extraction_callback(call):
     short_key = call.data.replace('ext_', '')
