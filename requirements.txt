@@ -1,6 +1,6 @@
 pyTelegramBotAPI
 requests
 flask
-yt-dlp
+yt-dlp>=2024.01.01
 instaloader
 moviepy
