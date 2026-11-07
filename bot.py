@@ -1,6 +1,7 @@
 import os
 import glob
 import re
+import uuid
 import requests
 from threading import Thread
 from flask import Flask
@@ -8,25 +9,8 @@ import telebot
 from telebot import apihelper
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 import yt_dlp
-import instaloader
-
-try:
-    from moviepy.editor import VideoFileClip
-except ImportError:
-    from moviepy import VideoFileClip
 
 MAX_TELEGRAM_SIZE = 49 * 1024 * 1024
-
-def extract_audio_from_video(video_path):
-    try:
-        audio_path = video_path.rsplit('.', 1)[0] + '.mp3'
-        video = VideoFileClip(video_path)
-        video.audio.write_audiofile(audio_path, logger=None)
-        video.close()
-        return audio_path
-    except Exception as e:
-        print(f"Audio extraction error: {e}")
-        return None
 
 apihelper.CONNECT_TIMEOUT = 120
 apihelper.READ_TIMEOUT = 300
@@ -54,28 +38,29 @@ HEADERS = {
     'Accept': 'application/json, text/plain, */*'
 }
 
+if not os.path.exists('downloads'):
+    os.makedirs('downloads')
+
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     welcome_text = (
         "أهلاً بك في البوت الشامل! 🚀\n\n"
         "✨ **الخدمات المتاحة:**\n"
-        "1️⃣ **تنزيل الوسائط:** فيديوهات تيك توك، إنستغرام، يوتيوب.\n"
+        "1️⃣ **تنزيل الوسائط:** فيديوهات تيك توك، إنستغرام، يوتيوب، تويتر وغيرها.\n"
         "2️⃣ **ألبومات تيك توك:** تنزيل الصور كاملة بدقتها الأصلية مع الصوت.\n"
-        "3️⃣ **استخراج الصوت:** تحويل الفيديو لمقطع صوتي.\n"
+        "3️⃣ **استخراج الصوت:** تحويل أي فيديو لمقطع صوتي مباشرة.\n"
         "4️⃣ **استخراج النصوص (OCR):** قراءة النصوص من الصور."
     )
-    bot.reply_to(message, welcome_text)
+    bot.reply_to(message, welcome_text, parse_mode="Markdown")
 
-# تنزيل ومعالجة تيك توك عبر استدعاء موثوق
+# تنزيل ومعالجة تيك توك عبر TikWM API
 def download_tiktok_content(chat_id, raw_url, status_msg_id):
     try:
-        # استخدام طلب POST لواجهة TikWM لضمان فك الروابط المختصرة والصور
         api_url = "https://www.tikwm.com/api/"
         payload = {'url': raw_url, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}
         res = requests.post(api_url, data=payload, headers=HEADERS, timeout=25).json()
 
         if res.get('code') != 0:
-            # محاولة احتياطية GET
             res = requests.get(f"https://www.tikwm.com/api/?url={raw_url}", headers=HEADERS, timeout=25).json()
 
         if res.get('code') == 0:
@@ -92,14 +77,14 @@ def download_tiktok_content(chat_id, raw_url, status_msg_id):
                     try:
                         r = requests.get(img_url, headers=HEADERS, timeout=15)
                         if r.status_code == 200:
-                            img_path = f"downloads/tk_img_{chat_id}_{idx}.jpg"
+                            img_path = f"downloads/tk_img_{chat_id}_{idx}_{uuid.uuid4().hex[:4]}.jpg"
                             with open(img_path, 'wb') as f:
                                 f.write(r.content)
                             saved_files.append(img_path)
                     except Exception as err:
                         print(f"Error fetching image: {err}")
 
-                # إرسال الصور كملفات حقيقية (حتى 10 في كل دفعة)
+                # إرسال الصور (10 صور كحد أقصى بكل دفعة)
                 for i in range(0, len(saved_files), 10):
                     batch = saved_files[i:i + 10]
                     media_group = []
@@ -113,19 +98,17 @@ def download_tiktok_content(chat_id, raw_url, status_msg_id):
                     for fh in open_handles:
                         fh.close()
 
-                # تنظيف الصور
+                # تنظيف صور الألبوم
                 for path in saved_files:
-                    try:
+                    if os.path.exists(path):
                         os.remove(path)
-                    except Exception:
-                        pass
 
                 # إرسال الصوت المرفق
                 if music_url:
                     try:
                         audio_res = requests.get(music_url, headers=HEADERS, timeout=25)
                         if audio_res.status_code == 200:
-                            audio_path = f"downloads/tk_audio_{chat_id}.mp3"
+                            audio_path = f"downloads/tk_audio_{chat_id}_{uuid.uuid4().hex[:4]}.mp3"
                             with open(audio_path, 'wb') as f:
                                 f.write(audio_res.content)
                             with open(audio_path, 'rb') as af:
@@ -142,16 +125,20 @@ def download_tiktok_content(chat_id, raw_url, status_msg_id):
             video_url = data.get('play')
             if video_url:
                 v_res = requests.get(video_url, headers=HEADERS, timeout=40)
-                video_path = f"downloads/tk_vid_{chat_id}.mp4"
+                video_path = f"downloads/tk_vid_{chat_id}_{uuid.uuid4().hex[:4]}.mp4"
                 with open(video_path, 'wb') as f:
                     f.write(v_res.content)
 
                 markup = InlineKeyboardMarkup()
-                btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"extract_{os.path.basename(video_path)}")
+                # تمرير الرابط الأصلي في الزر لاستخراج الصوت مباشرة دون الحاجة للوسائط المحفوظة
+                btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"extaudio_{raw_url}")
                 markup.add(btn)
 
                 with open(video_path, 'rb') as vf:
                     bot.send_video(chat_id, vf, caption="تم تنزيل الفيديو بنجاح! 🎬✨", reply_markup=markup)
+
+                if os.path.exists(video_path):
+                    os.remove(video_path)
 
                 bot.delete_message(chat_id, status_msg_id)
                 return True
@@ -191,7 +178,8 @@ def handle_photo_ocr(message):
                 bot.edit_message_text(
                     f"📝 **النص المستخرج من الصورة:**\n\n{extracted_text}",
                     message.chat.id,
-                    msg.message_id
+                    msg.message_id,
+                    parse_mode="Markdown"
                 )
                 return
 
@@ -209,16 +197,7 @@ def handle_message(message):
         raw_url = urls[0]
         msg = bot.reply_to(message, "جاري المعالجة وتنزيل المحتوى... ⏳")
 
-        if not os.path.exists('downloads'):
-            os.makedirs('downloads')
-        
-        for f in glob.glob('downloads/*'):
-            try:
-                os.remove(f)
-            except Exception:
-                pass
-
-        # إذا كان الرابط تيك توك يعالج فوراً
+        # معالجة تيك توك
         if 'tiktok.com' in raw_url:
             success = download_tiktok_content(message.chat.id, raw_url, msg.message_id)
             if success:
@@ -227,82 +206,46 @@ def handle_message(message):
                 bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط. ❌", message.chat.id, msg.message_id)
                 return
 
-        clean_link = raw_url.split('?')[0]
-
-        if 'instagram.com' in raw_url:
-            try:
-                L = instaloader.Instaloader(
-                    dirname_pattern='downloads',
-                    filename_pattern='{shortcode}',
-                    download_videos=True,
-                    download_video_thumbnails=False,
-                    download_geotags=False,
-                    download_comments=False,
-                    save_metadata=False
-                )
-                
-                shortcode = None
-                if '/reel/' in clean_link:
-                    shortcode = clean_link.split('/reel/')[1].split('/')[0]
-                elif '/p/' in clean_link:
-                    shortcode = clean_link.split('/p/')[1].split('/')[0]
-                    
-                if shortcode:
-                    post = instaloader.Post.from_shortcode(L.context, shortcode)
-                    L.download_post(post, target='downloads')
-            except Exception as e:
-                print(f"Instaloader error: {e}")
+        req_id = uuid.uuid4().hex[:6]
+        output_template = f'downloads/{message.chat.id}_{req_id}_%(id)s.%(ext)s'
 
         ydl_opts = {
-            'outtmpl': 'downloads/%(id)s.%(ext)s',
+            'outtmpl': output_template,
             'quiet': True,
             'no_warnings': True,
-            'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
-            'check_formats': False,
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             }
         }
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
-                ydl.download([clean_link])
-            except Exception:
-                try:
-                    ydl.download([raw_url])
-                except Exception as e:
-                    print(f"yt-dlp error: {e}")
+        downloaded_files = []
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([raw_url])
 
-        downloaded_files = glob.glob('downloads/*')
+            downloaded_files = glob.glob(f'downloads/{message.chat.id}_{req_id}_*')
 
-        if downloaded_files:
-            try:
+            if downloaded_files:
                 for file_path in downloaded_files:
                     file_size = os.path.getsize(file_path)
 
                     if file_size > MAX_TELEGRAM_SIZE:
                         bot.edit_message_text("⚠️ حجم هذا الملف يزيد عن 50 ميجابايت (الحد المسموح في تليجرام).", message.chat.id, msg.message_id)
-                        os.remove(file_path)
-                        return
+                        continue
 
                     ext = file_path.split('.')[-1].lower()
                     
                     if ext in ['jpg', 'jpeg', 'png', 'webp']:
                         with open(file_path, 'rb') as file_data:
-                            bot.send_photo(message.chat.id, file_data, timeout=120)
-                        os.remove(file_path)
+                            bot.send_photo(message.chat.id, file_data, caption="✅ تم التنزيل بنجاح!", timeout=120)
                         
                     elif ext in ['mp4', 'mkv', 'webm', 'mov']:
-                        temp_video_path = f"downloads/temp_{os.path.basename(file_path)}"
-                        os.rename(file_path, temp_video_path)
-                        
                         markup = InlineKeyboardMarkup()
-                        btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"extract_{os.path.basename(temp_video_path)}")
+                        btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"extaudio_{raw_url}")
                         markup.add(btn)
 
-                        with open(temp_video_path, 'rb') as video_file:
+                        with open(file_path, 'rb') as video_file:
                             bot.send_video(
                                 message.chat.id, 
                                 video_file, 
@@ -310,45 +253,62 @@ def handle_message(message):
                                 reply_markup=markup,
                                 timeout=300
                             )
-                        os.remove(temp_video_path)
-                            
                     else:
                         with open(file_path, 'rb') as file_data:
                             bot.send_document(message.chat.id, file_data, timeout=300)
-                        os.remove(file_path)
 
                 bot.delete_message(message.chat.id, msg.message_id)
+            else:
+                bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط.", message.chat.id, msg.message_id)
 
-            except Exception as e:
-                bot.edit_message_text(f"حدث خطأ أثناء إرسال الملف: {str(e)}", message.chat.id, msg.message_id)
-        else:
-            bot.edit_message_text("عذراً، تعذر استخراج المحتوى من هذا الرابط.", message.chat.id, msg.message_id)
+        except Exception as e:
+            bot.edit_message_text(f"حدث خطأ أثناء تنزيل الملف: {str(e)}", message.chat.id, msg.message_id)
             
+        finally:
+            # تنظيف الملفات الخاصة بهذا الطلب فقط
+            for f in downloaded_files:
+                if os.path.exists(f):
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
     else:
         bot.reply_to(message, "يرجى إرسال رابط فيديو/صورة للتنزيل، أو صورة تحتوي على نص لقراءتها. 📌")
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('extract_'))
-def handle_audio_extraction(call):
-    filename = call.data.replace('extract_', '')
-    video_path = os.path.join('downloads', filename)
+@bot.callback_query_handler(func=lambda call: call.data.startswith('extaudio_'))
+def handle_audio_extraction_callback(call):
+    target_url = call.data.replace('extaudio_', '')
+    bot.answer_callback_query(call.id, "جاري استخراج وتحميل الصوت... ⏳")
     
-    if os.path.exists(video_path):
-        bot.answer_callback_query(call.id, "جاري استخراج الصوت... ⏳")
-        audio_path = extract_audio_from_video(video_path)
+    req_id = uuid.uuid4().hex[:6]
+    audio_out_tmpl = f'downloads/audio_{call.message.chat.id}_{req_id}.%(ext)s'
+    
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': audio_out_tmpl,
+        'quiet': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+    }
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([target_url])
+            
+        expected_audio_path = f'downloads/audio_{call.message.chat.id}_{req_id}.mp3'
         
-        if audio_path and os.path.exists(audio_path):
-            with open(audio_path, 'rb') as audio_file:
-                bot.send_audio(call.message.chat.id, audio_file, title="الصوت المستخرج 🎵")
-            os.remove(audio_path)
+        if os.path.exists(expected_audio_path):
+            with open(expected_audio_path, 'rb') as af:
+                bot.send_audio(call.message.chat.id, af, title="الصوت المستخرج 🎵")
+            os.remove(expected_audio_path)
         else:
-            bot.send_message(call.message.chat.id, "عذراً، حدث خطأ أثناء استخراج الصوت. ❌")
+            bot.send_message(call.message.chat.id, "❌ متعذر استخراج الصوت من هذا الفيديو.")
             
-        if os.path.exists(video_path):
-            os.remove(video_path)
-            
-        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-    else:
-        bot.answer_callback_query(call.id, "انتهت صلاحية هذا الملف أو تم حذفه! ❌", show_alert=True)
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ حدث خطأ أثناء استخراج الصوت: {str(e)}")
 
 try:
     requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10)
@@ -356,4 +316,6 @@ try:
 except Exception as e:
     print(f"Failed to clear webhook: {e}")
 
-bot.infinity_polling(timeout=10, long_polling_timeout=5)
+if __name__ == "__main__":
+    print("🤖 البوت يعمل بنجاح...")
+    bot.infinity_polling(timeout=10, long_polling_timeout=5)
