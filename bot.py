@@ -313,4 +313,4 @@ except Exception as e:
 
 if __name__ == "__main__":
     print("🤖 البوت يعمل بنجاح...")
-    bot.infinity_polling(timeout=20, long_polling_timeout=10, skip_pending_updates=True)
+    bot.infinity_polling(timeout=10, long_polling_timeout=5)
