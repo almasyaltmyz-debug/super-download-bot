@@ -7,15 +7,14 @@ from threading import Thread
 from flask import Flask
 import telebot
 from telebot import apihelper
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 import yt_dlp
 import instaloader
 
-# إعدادات مهلة الاتصال لتجنب انقطاع الرفع في الملفات الكبيرة
+# إعدادات مهلة الاتصال لتجنب انقطاع الرفع
 apihelper.CONNECT_TIMEOUT = 120
 apihelper.READ_TIMEOUT = 300
 
-# الحد الأقصى لرفع الملفات في بوتات تليجرام القياسية (49 ميجابايت للأمان)
 MAX_TELEGRAM_SIZE = 49 * 1024 * 1024
 
 app = Flask(__name__)
@@ -27,23 +26,28 @@ def home():
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
-# ذاكرة مؤقتة لحفظ الروابط وتجنب خطأ تجاوز 64 بايت في أزرار تليجرام
 URL_CACHE = {}
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    'Accept': 'application/json, text/plain, */*'
+    'Accept': 'application/json, text/plain, */*',
+    'Referer': 'https://www.tikwm.com/'
 }
 
 if not os.path.exists('downloads'):
     os.makedirs('downloads')
 
-def resolve_tiktok_url(url):
+# فك الرابط المختصر وتحويل /photo/ إلى /video/ لتقبله جميع الواجهات
+def prepare_tiktok_url(url):
     try:
-        res = requests.get(url, headers=HEADERS, allow_redirects=True, timeout=10)
-        return res.url.split('?')[0]
+        res = requests.get(url, headers=HEADERS, allow_redirects=True, timeout=12)
+        clean = res.url.split('?')[0]
     except Exception:
-        return url.split('?')[0]
+        clean = url.split('?')[0]
+    
+    # الخدعة الأساسية: استبدال photo بـ video ليتمكن الـ API من قراءة الألبوم
+    normalized_url = clean.replace('/photo/', '/video/')
+    return clean, normalized_url
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
@@ -62,7 +66,6 @@ def send_photo_album(chat_id, saved_files, music_url=None, title="ألبوم ص�
     if not saved_files:
         return False
 
-    # إرسال الصور في مجموعات (بحد أقصى 10 صور لكل دفعة حسب قيود تليجرام)
     for i in range(0, len(saved_files), 10):
         batch = saved_files[i:i + 10]
         media_group = []
@@ -89,11 +92,12 @@ def send_photo_album(chat_id, saved_files, music_url=None, title="ألبوم ص�
             except Exception:
                 pass
 
-    # إرسال الصوت المرفق إن وجد (خاص بسلايدات تيك توك)
     if music_url:
         try:
+            if not music_url.startswith('http'):
+                music_url = "https://www.tikwm.com" + music_url
             audio_res = requests.get(music_url, headers=HEADERS, timeout=25)
-            if audio_res.status_code == 200:
+            if audio_res.status_code == 200 and len(audio_res.content) > 1000:
                 audio_path = f"downloads/tk_audio_{chat_id}_{uuid.uuid4().hex[:4]}.mp3"
                 with open(audio_path, 'wb') as f:
                     f.write(audio_res.content)
@@ -107,106 +111,112 @@ def send_photo_album(chat_id, saved_files, music_url=None, title="ألبوم ص�
 
 # ==================== معالج تيك توك (فيديو + ألبومات صور) ====================
 def download_tiktok_content(chat_id, raw_url, status_msg_id):
-    clean_url = resolve_tiktok_url(raw_url)
+    clean_url, normalized_url = prepare_tiktok_url(raw_url)
 
-    # المحاولة الأولى: TikWM API (POST)
-    try:
-        api_url = "https://www.tikwm.com/api/"
-        payload = {'url': clean_url, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}
-        res = requests.post(api_url, data=payload, headers=HEADERS, timeout=20)
+    # نجرب الرابط المعدل (/video/) ثم الرابط الخام لضمان الاستجابة 100%
+    urls_to_try = [normalized_url, raw_url, clean_url]
 
-        if res.status_code == 200 and res.text.strip():
-            json_data = res.json()
-            if json_data.get('code') == 0:
-                data = json_data.get('data', {})
+    # المحاولة الأولى: TikWM API
+    for target in urls_to_try:
+        try:
+            api_url = "https://www.tikwm.com/api/"
+            payload = {'url': target, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}
+            res = requests.post(api_url, data=payload, headers=HEADERS, timeout=20)
 
-                # 1. إذا كان ألبوم صور (Slideshow)
-                images = data.get('images')
-                if images and isinstance(images, list):
-                    music_url = data.get('music')
-                    title = data.get('title', 'ألبوم صور تيك توك')
+            if res.status_code == 200 and res.text.strip():
+                json_data = res.json()
+                if json_data.get('code') == 0 and json_data.get('data'):
+                    data = json_data['data']
+
+                    # 1. إذا كان ألبوم صور (Slideshow)
+                    images = data.get('images')
+                    if images and isinstance(images, list):
+                        music_url = data.get('music') or data.get('play')
+                        title = data.get('title') or 'ألبوم صور تيك توك'
+                        saved_files = []
+
+                        for idx, img_url in enumerate(images):
+                            try:
+                                if not img_url.startswith('http'):
+                                    img_url = "https://www.tikwm.com" + img_url
+                                r = requests.get(img_url, headers=HEADERS, timeout=15)
+                                if r.status_code == 200 and len(r.content) > 500:
+                                    img_path = f"downloads/tk_img_{chat_id}_{idx}_{uuid.uuid4().hex[:4]}.jpg"
+                                    with open(img_path, 'wb') as f:
+                                        f.write(r.content)
+                                    saved_files.append(img_path)
+                            except Exception as err:
+                                print(f"Error downloading TikTok image {idx}: {err}")
+
+                        if saved_files:
+                            send_photo_album(chat_id, saved_files, music_url, title)
+                            bot.delete_message(chat_id, status_msg_id)
+                            return True
+
+                    # 2. إذا كان فيديو عادي
+                    video_url = data.get('hdplay') or data.get('play')
+                    if video_url:
+                        if not video_url.startswith('http'):
+                            video_url = "https://www.tikwm.com" + video_url
+                        v_res = requests.get(video_url, headers=HEADERS, timeout=35)
+
+                        if len(v_res.content) > MAX_TELEGRAM_SIZE and data.get('play'):
+                            play_url = data.get('play')
+                            if not play_url.startswith('http'):
+                                play_url = "https://www.tikwm.com" + play_url
+                            v_res = requests.get(play_url, headers=HEADERS, timeout=35)
+
+                        video_path = f"downloads/tk_vid_{chat_id}_{uuid.uuid4().hex[:4]}.mp4"
+                        with open(video_path, 'wb') as f:
+                            f.write(v_res.content)
+
+                        if os.path.getsize(video_path) <= MAX_TELEGRAM_SIZE:
+                            short_key = uuid.uuid4().hex[:8]
+                            URL_CACHE[short_key] = normalized_url
+                            markup = InlineKeyboardMarkup()
+                            btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"ext_{short_key}")
+                            markup.add(btn)
+
+                            with open(video_path, 'rb') as vf:
+                                bot.send_video(chat_id, vf, caption="تم تنزيل الفيديو بنجاح! 🎬✨", reply_markup=markup, timeout=300)
+
+                            if os.path.exists(video_path):
+                                os.remove(video_path)
+                            bot.delete_message(chat_id, status_msg_id)
+                            return True
+                        else:
+                            if os.path.exists(video_path):
+                                os.remove(video_path)
+        except Exception as e:
+            print(f"TikWM attempt failed for {target}: {e}")
+
+    # المحاولة الثانية: TiklyDown API (باستخدام الرابط المعدل أيضاً)
+    for target in [normalized_url, clean_url]:
+        try:
+            fallback_api = f"https://api.tiklydown.eu.org/api/download?url={target}"
+            f_res = requests.get(fallback_api, headers=HEADERS, timeout=20)
+            if f_res.status_code == 200:
+                f_data = f_res.json()
+                if 'images' in f_data and f_data['images']:
+                    images = [img['url'] if isinstance(img, dict) else img for img in f_data['images']]
+                    music_url = f_data.get('music', {}).get('play_url') if isinstance(f_data.get('music'), dict) else None
+                    title = f_data.get('title', 'ألبوم صور تيك توك')
                     saved_files = []
 
                     for idx, img_url in enumerate(images):
-                        try:
-                            r = requests.get(img_url, headers=HEADERS, timeout=15)
-                            if r.status_code == 200:
-                                img_path = f"downloads/tk_img_{chat_id}_{idx}_{uuid.uuid4().hex[:4]}.jpg"
-                                with open(img_path, 'wb') as f:
-                                    f.write(r.content)
-                                saved_files.append(img_path)
-                        except Exception as err:
-                            print(f"Error downloading TikTok image {idx}: {err}")
+                        r = requests.get(img_url, headers=HEADERS, timeout=15)
+                        if r.status_code == 200:
+                            img_path = f"downloads/tk2_img_{chat_id}_{idx}_{uuid.uuid4().hex[:4]}.jpg"
+                            with open(img_path, 'wb') as f:
+                                f.write(r.content)
+                            saved_files.append(img_path)
 
                     if saved_files:
                         send_photo_album(chat_id, saved_files, music_url, title)
                         bot.delete_message(chat_id, status_msg_id)
                         return True
-
-                # 2. إذا كان فيديو عادي
-                video_url = data.get('hdplay') or data.get('play')
-                if video_url:
-                    if not video_url.startswith('http'):
-                        video_url = "https://www.tikwm.com" + video_url
-                    v_res = requests.get(video_url, headers=HEADERS, timeout=35)
-                    
-                    # إذا كانت نسخة الـ HD أكبر من 49 ميجابايت، نعود للنسخة العادية
-                    if len(v_res.content) > MAX_TELEGRAM_SIZE and data.get('play'):
-                        play_url = data.get('play')
-                        if not play_url.startswith('http'):
-                            play_url = "https://www.tikwm.com" + play_url
-                        v_res = requests.get(play_url, headers=HEADERS, timeout=35)
-
-                    video_path = f"downloads/tk_vid_{chat_id}_{uuid.uuid4().hex[:4]}.mp4"
-                    with open(video_path, 'wb') as f:
-                        f.write(v_res.content)
-
-                    if os.path.getsize(video_path) <= MAX_TELEGRAM_SIZE:
-                        short_key = uuid.uuid4().hex[:8]
-                        URL_CACHE[short_key] = clean_url
-                        markup = InlineKeyboardMarkup()
-                        btn = InlineKeyboardButton("استخراج الصوت 🎵", callback_data=f"ext_{short_key}")
-                        markup.add(btn)
-
-                        with open(video_path, 'rb') as vf:
-                            bot.send_video(chat_id, vf, caption="تم تنزيل الفيديو بنجاح! 🎬✨", reply_markup=markup, timeout=300)
-
-                        if os.path.exists(video_path):
-                            os.remove(video_path)
-                        bot.delete_message(chat_id, status_msg_id)
-                        return True
-                    else:
-                        if os.path.exists(video_path):
-                            os.remove(video_path)
-    except Exception as e:
-        print(f"TikWM attempt failed: {e}")
-
-    # المحاولة الثانية لتيك توك: TiklyDown API
-    try:
-        fallback_api = f"https://api.tiklydown.eu.org/api/download?url={clean_url}"
-        f_res = requests.get(fallback_api, headers=HEADERS, timeout=20)
-        if f_res.status_code == 200:
-            f_data = f_res.json()
-            if 'images' in f_data and f_data['images']:
-                images = [img['url'] if isinstance(img, dict) else img for img in f_data['images']]
-                music_url = f_data.get('music', {}).get('play_url') if isinstance(f_data.get('music'), dict) else None
-                title = f_data.get('title', 'ألبوم صور تيك توك')
-                saved_files = []
-
-                for idx, img_url in enumerate(images):
-                    r = requests.get(img_url, headers=HEADERS, timeout=15)
-                    if r.status_code == 200:
-                        img_path = f"downloads/tk2_img_{chat_id}_{idx}_{uuid.uuid4().hex[:4]}.jpg"
-                        with open(img_path, 'wb') as f:
-                            f.write(r.content)
-                        saved_files.append(img_path)
-
-                if saved_files:
-                    send_photo_album(chat_id, saved_files, music_url, title)
-                    bot.delete_message(chat_id, status_msg_id)
-                    return True
-    except Exception as e:
-        print(f"TiklyDown fallback failed: {e}")
+        except Exception as e:
+            print(f"TiklyDown fallback failed: {e}")
 
     return False
 
@@ -215,14 +225,12 @@ def download_instagram_content(chat_id, raw_url, status_msg_id):
     req_id = uuid.uuid4().hex[:6]
     target_dir = f"downloads/insta_{chat_id}_{req_id}"
     
-    # استخراج كود المنشور (Shortcode) من الرابط
     match = re.search(r'instagram\.com/(?:[A-Za-z0-9_.-]+/)?(?:p|reel|tv)/([A-Za-z0-9_-]+)', raw_url)
     if not match:
         return False
     
     shortcode = match.group(1)
 
-    # المحاولة الأولى لإنستغرام: عبر Instaloader (يدعم الصور والألبومات والريلز)
     try:
         L = instaloader.Instaloader(
             dirname_pattern=target_dir,
@@ -244,7 +252,6 @@ def download_instagram_content(chat_id, raw_url, status_msg_id):
             photos = [f for f in media_files if f.split('.')[-1].lower() in ['jpg', 'jpeg', 'png', 'webp']]
             videos = [f for f in media_files if f.split('.')[-1].lower() == 'mp4']
 
-            # إرسال الفيديوهات إن وجدت
             for v_path in videos:
                 if os.path.getsize(v_path) <= MAX_TELEGRAM_SIZE:
                     short_key = uuid.uuid4().hex[:8]
@@ -255,11 +262,9 @@ def download_instagram_content(chat_id, raw_url, status_msg_id):
                     with open(v_path, 'rb') as vf:
                         bot.send_video(chat_id, vf, caption="تم التنزيل من إنستغرام بنجاح! 🎬✨", reply_markup=markup, timeout=300)
 
-            # إرسال الصور (فقط الصور التي ليست غلافاً لنفس الفيديو في المنشور المفرد)
             if photos and not (len(videos) == 1 and len(photos) == 1 and not post.typename == 'GraphSidecar'):
                 send_photo_album(chat_id, photos)
 
-            # تنظيف مجلد إنستغرام المؤقت
             for f in glob.glob(f"{target_dir}/*"):
                 try:
                     os.remove(f)
@@ -274,7 +279,6 @@ def download_instagram_content(chat_id, raw_url, status_msg_id):
             return True
     except Exception as e:
         print(f"Instaloader attempt note: {e}")
-        # تنظيف في حال الفشل الجزئي
         for f in glob.glob(f"{target_dir}/*"):
             try:
                 os.remove(f)
@@ -345,13 +349,19 @@ def handle_message(message):
         if 'tiktok.com' in raw_url:
             if download_tiktok_content(message.chat.id, raw_url, msg.message_id):
                 return
+            # إذا فشل وكان الرابط يحتوي على /photo/ نوقف المحاولة هنا لأن yt-dlp لا يدعم صور تيك توك
+            clean_check, norm_check = prepare_tiktok_url(raw_url)
+            if '/photo/' in clean_check:
+                bot.edit_message_text("عذراً، تعذر جلب ألبوم الصور حالياً، يرجى المحاولة بعد قليل. ❌", message.chat.id, msg.message_id)
+                return
+            raw_url = norm_check
 
         # 2. إذا كان الرابط إنستغرام
         if 'instagram.com' in raw_url:
             if download_instagram_content(message.chat.id, raw_url, msg.message_id):
                 return
 
-        # 3. المعالج الشامل (yt-dlp) ليوتيوب، تويتر، وفيديوهات إنستغرام/تيك توك الاحتياطية
+        # 3. المعالج الشامل للفيديوهات عبر (yt-dlp)
         req_id = uuid.uuid4().hex[:6]
         output_template = f'downloads/{message.chat.id}_{req_id}_%(id)s.%(ext)s'
 
@@ -482,5 +492,5 @@ bot_thread.daemon = True
 bot_thread.start()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
