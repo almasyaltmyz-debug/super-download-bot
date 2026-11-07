@@ -2,5 +2,6 @@ pyTelegramBotAPI
 requests
 flask
 yt-dlp>=2024.01.01
+gallery-dl
 instaloader
 moviepy
