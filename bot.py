@@ -1,6 +1,60 @@
-# تنزيل ومعالجة تيك توك عبر TikWM API مع محاولة احتياطية عبر yt-dlp
+import os
+import glob
+import re
+import uuid
+import requests
+from threading import Thread
+from flask import Flask
+import telebot
+from telebot import apihelper
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+import yt_dlp
+
+MAX_TELEGRAM_SIZE = 49 * 1024 * 1024
+
+apihelper.CONNECT_TIMEOUT = 120
+apihelper.READ_TIMEOUT = 300
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive and running!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+keep_alive()
+
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
+bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
+
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*'
+}
+
+if not os.path.exists('downloads'):
+    os.makedirs('downloads')
+
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    welcome_text = (
+        "أهلاً بك في البوت الشامل! 🚀\n\n"
+        "✨ **الخدمات المتاحة:**\n"
+        "1️⃣ **تنزيل الوسائط:** فيديوهات تيك توك، إنستغرام، يوتيوب، تويتر وغيرها.\n"
+        "2️⃣ **ألبومات تيك توك:** تنزيل الصور كاملة بدقتها الأصلية مع الصوت.\n"
+        "3️⃣ **استخراج الصوت:** تحويل أي فيديو لمقطع صوتي مباشرة.\n"
+        "4️⃣ **استخراج النصوص (OCR):** قراءة النصوص من الصور."
+    )
+    bot.reply_to(message, welcome_text, parse_mode="Markdown")
+
+# تنزيل ومعالجة تيك توك عبر TikWM API مع محاولة احتياطية
 def download_tiktok_content(chat_id, raw_url, status_msg_id):
-    # 1. التجربة الأولى عبر TikWM API
     try:
         api_url = "https://www.tikwm.com/api/"
         payload = {'url': raw_url, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1}
@@ -11,7 +65,7 @@ def download_tiktok_content(chat_id, raw_url, status_msg_id):
             if json_data.get('code') == 0:
                 data = json_data.get('data', {})
 
-                # حالة ألبوم الصور (Slideshow)
+                # 1. حالة ألبوم الصور (Slideshow)
                 if 'images' in data and data['images']:
                     images = data['images']
                     music_url = data.get('music')
@@ -63,7 +117,7 @@ def download_tiktok_content(chat_id, raw_url, status_msg_id):
                     bot.delete_message(chat_id, status_msg_id)
                     return True
 
-                # حالة الفيديو العادي
+                # 2. حالة الفيديو العادي
                 video_url = data.get('play')
                 if video_url:
                     v_res = requests.get(video_url, headers=HEADERS, timeout=30)
@@ -84,7 +138,4 @@ def download_tiktok_content(chat_id, raw_url, status_msg_id):
                     bot.delete_message(chat_id, status_msg_id)
                     return True
     except Exception as e:
-        print(f"TikWM attempt failed: {e}")
-
-    # 2. التجربة الاحتياطية تلقائياً عبر yt-dlp في حال فشل السيرفر الأولي
-    return False
+        print(f"TikWM attempt failed
